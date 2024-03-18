@@ -80,6 +80,16 @@ export class SubmitButton {
 
     close(): void {
         if (this.container) {
+            // Experimental YouTube layout with description on right
+            const isOnDescriptionOnRightLayout = document.querySelector("#title #description");
+            if (isOnDescriptionOnRightLayout) {
+                // Undo preventing color from changing on hover
+                const title = document.querySelector("#above-the-fold #title") as HTMLElement | null;
+                if (title) {
+                    title.style.removeProperty("background");
+                }
+            }
+            
             this.root?.unmount?.();
             this.root = null;
             this.container.remove();
@@ -91,10 +101,13 @@ export class SubmitButton {
         const referenceNode = this.button?.parentElement ?? await getOrCreateTitleButtonContainer();
         if (!referenceNode) return;
 
-        let popupNode = onMobile() 
+        // Experimental YouTube layout with description on right
+        const isOnDescriptionOnRightLayout = document.querySelector("#title #description");
+
+        let popupNode = onMobile()
             ? document.querySelector(".watch-below-the-player") 
             : document.querySelector("#secondary-inner");
-        if (!popupNode || popupNode.childElementCount < 2) {
+        if (!popupNode || popupNode.childElementCount < 2 || isOnDescriptionOnRightLayout) {
             popupNode = referenceNode.parentElement;
         }
 
@@ -102,6 +115,13 @@ export class SubmitButton {
             if (!this.container) {
                 this.container = document.createElement('span');
                 this.container.id = "cbSubmitMenu";
+
+                if (isOnDescriptionOnRightLayout) {
+                    this.container.style.marginTop = referenceNode.parentElement?.offsetHeight + "px";
+
+                    // Prevent color from changing on hover
+                    referenceNode.parentElement!.parentElement!.style.background = "transparent";
+                }
 
                 this.root = createRoot(this.container);
                 this.render();
@@ -143,11 +163,16 @@ export class SubmitButton {
 
     render(): void {
         if (this.root) {
-            this.root?.render(<SubmissionComponent video={getVideo()!} videoID={getVideoID()!} submissions={this.submissions} submitClicked={(title, thumbnail) => this.submitPressed(title, thumbnail)} />);
+            this.root?.render(<SubmissionComponent
+                video={getVideo()!}
+                videoID={getVideoID()!}
+                submissions={this.submissions}
+                submitClicked={(title, thumbnail, actAsVip) => this.submitPressed(title, thumbnail, actAsVip)}
+            />);
         }
     }
 
-    private async submitPressed(title: TitleSubmission | null, thumbnail: ThumbnailSubmission | null): Promise<boolean> {
+    private async submitPressed(title: TitleSubmission | null, thumbnail: ThumbnailSubmission | null, actAsVip: boolean): Promise<boolean> {
         if (title) {
             title.title = title.title.trim();
 
@@ -161,7 +186,7 @@ export class SubmitButton {
             return false;
         }
         
-        const result = await submitVideoBranding(getVideoID()!, title, thumbnail);
+        const result = await submitVideoBranding(getVideoID()!, title, thumbnail, false, actAsVip);
 
         if (result && result.ok) {
             this.close();

@@ -243,7 +243,7 @@ export async function capitalizeFirstLetter(word: string, isTurkiq: boolean): Pr
 
     if (startsWithEmojiLetter(word)) {
         // Emoji letter is already "capitalized"
-        return await await toLowerCase(word, isTurkiq);
+        return await toLowerCase(word, isTurkiq);
     }
 
     for (const char of word) {
@@ -385,7 +385,10 @@ async function checkLanguages(title: string, languages: string[], percentage: nu
     topLanguage?: string | null;
     isReliable: boolean;
 }> {
-    if (!cld && (typeof chrome === "undefined" || !("detectLanguage" in chrome.i18n))) {
+    if (!cld && (typeof chrome === "undefined"
+            || !("detectLanguage" in chrome.i18n))
+            || typeof(window) === "undefined"
+            || window.location.pathname.includes(".html")) {
         return {
             results: languages.map(() => false),
             isReliable: false
@@ -527,10 +530,10 @@ export function cleanEmojis(title: string): string {
 
     const cleaned = title
         // Clear extra spaces between emoji "words"
-        .replace(/ ((?=\p{Extended_Pictographic})(?=[^🅰🆎🅱🆑🅾])\S(?:\uFE0F?\uFE0E?\p{Emoji_Modifier}?\u200D?)*)+(?= )/ug, "")
+        .replace(/ ((?=\p{Extended_Pictographic}|☆)(?=[^🅰🆎🅱🆑🅾])\S(?:\uFE0F?\uFE0E?\p{Emoji_Modifier}?\u200D?)*)+(?= )/ug, "")
         // Emojis in between letters should be spaces, varient selector is allowed before to allow B emoji
-        .replace(/(\p{L}|[\uFE0F\uFE0E🆎🆑])(?:(?=\p{Extended_Pictographic})(?=[^🅰🆎🅱🆑🅾])\S(?:\uFE0F?\uFE0E?\p{Emoji_Modifier}?\u200D?)*)+(\p{L}|[🅰🆎🅱🆑🅾])/ug, "$1 $2")
-        .replace(/(?=\p{Extended_Pictographic})(?=[^🅰🆎🅱🆑🅾])\S(?:\uFE0F?\uFE0E?\p{Emoji_Modifier}?\u200D?)*/ug, "")
+        .replace(/(\p{L}|[\uFE0F\uFE0E🆎🆑])(?:(?=\p{Extended_Pictographic}|☆)(?=[^🅰🆎🅱🆑🅾])\S(?:\uFE0F?\uFE0E?\p{Emoji_Modifier}?\u200D?)*)+(?=\p{L}|[🅰🆎🅱🆑🅾])/ug, "$1 ")
+        .replace(/(?=\p{Extended_Pictographic}|☆)(?=[^🅰🆎🅱🆑🅾])\S(?:\uFE0F?\uFE0E?\p{Emoji_Modifier}?\u200D?)*/ug, "")
         .trim();
 
     if (cleaned.length > 0) {
@@ -542,4 +545,54 @@ export function cleanEmojis(title: string): string {
 
 function listHasWord(list: Set<string>, word: string): boolean {
     return list.has(word.replace(/[[「〈《【〔⦗『〖〘<({:〙〗』⦘〕】》〉」)}\]]/g, ""))
+}
+
+
+export async function localizeHtmlPageWithFormatting(): Promise<void> {
+    // Localize by replacing __MSG_***__ meta tags
+    const localizedTitle = await getLocalizedMessageWithFormatting(document.title);
+    if (localizedTitle) document.title = localizedTitle;
+
+    const body = document.querySelector(".sponsorBlockPageBody");
+    const localizedMessage = await getLocalizedMessageWithFormatting(body!.innerHTML.toString());
+    if (localizedMessage) body!.innerHTML = localizedMessage;
+}
+
+async function getLocalizedMessageWithFormatting(text: string): Promise<string | false> {
+    const promises: Promise<string>[] = [];
+    text.replace(/__MSG_(\w+)__|(DeArrow|Ajay Ramachandran)/g, (match, v1: string, v2) => {
+        if (v2) {
+            promises.push(formatTitle(v2, false, null));
+        } else if (v1) {
+            if (v1.match(/^what|Description\d?$/) && Config.config!.titleFormatting === TitleFormatting.TitleCase) {
+                // Don't title case descriptions
+                promises.push(Promise.resolve(chrome.i18n.getMessage(v1).replace(/</g, "&#60;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/\n/g, "<br/>")));
+            } else {
+                promises.push(
+                    formatTitle(chrome.i18n.getMessage(v1), false, null)
+                        .then((result) => result.replace(/</g, "&#60;")
+                                                .replace(/"/g, "&quot;")
+                                                .replace(/\n/g, "<br/>")));
+            }
+        } else {
+            promises.push(Promise.resolve(""));
+        }
+
+        return "";
+    });
+
+    const results = await Promise.all(promises);
+
+    let count = 0;
+    const valNewH = text.replace(/__MSG_(\w+)__|(DeArrow|Ajay Ramachandran)/g, () => {
+        return results[count++];
+    });
+
+    if (valNewH != text) {
+        return valNewH;
+    } else {
+        return false;
+    }
 }

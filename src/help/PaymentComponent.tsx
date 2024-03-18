@@ -79,6 +79,7 @@ export const PaymentComponent = () => {
             } else if (choices.freeTrial) {
                 setPaymentResult(PaymentResultMessageType.FreeTrial)
                 Config.config!.freeTrialStart = Date.now();
+                Config.config!.freeTrialEnded = false;
             }
 
             window.scrollTo(0, 0);

@@ -155,6 +155,7 @@ describe("toTitleCase cleanEmojis", () => {
         ["5 min countdown 👷🏾‍♀️👷🏾‍♀️👷🏾‍♀️ timer (roller👷🏾‍♀️👷🏾‍♀️👷🏾‍♀️coaster) 👷🏾‍♀️", "5 Min Countdown Timer (Roller Coaster)"],
         ["5 min countdown 👩🏽‍👨🏽‍👦🏽‍👦🏽 timer (roller👩🏽‍👨🏽‍👦🏽‍👦🏽👩🏽‍👨🏽‍👦🏽‍👦🏽coaster) 👩🏽‍👨🏽‍👦🏽‍👦🏽👩🏽‍👨🏽‍👦🏽‍👦🏽", "5 Min Countdown Timer (Roller Coaster)"],
         ["😀︎😀︎😀︎ 5 min countdown timer😀︎ 😀︎😀︎😀︎ (roller😀︎😀︎😀︎coaster) 😀︎", "5 Min Countdown Timer (Roller Coaster)"],
+        ["STAR☆T☆RAIN -New Arrange Ver.-", "Star T Rain -New Arrange Ver.-"],
     ];
     for (const testCase of titleCases) {
         const [input, expected] = testCase;
@@ -208,6 +209,7 @@ describe("toSentenceCase", () => {
         ["Nose slice VFX - pracical vs. digital effect", "Nose slice VFX - Pracical vs. digital effect"],
         ["One thing: then another thing", "One thing: Then another thing"],
         ["One thing: but-then another thing", "One thing: But-then another thing"],
+        ["Why I Won't Buy Into The Tesla Cybertruck Hype When my Alternative is Much More Fun", "Why I won't buy into the tesla cybertruck hype when my alternative is much more fun"],
     ];
     for (const testCase of sentenceCases) {
         const [input, expected] = testCase;

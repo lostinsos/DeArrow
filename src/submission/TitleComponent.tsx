@@ -2,12 +2,19 @@ import * as React from "react";
 import { RenderedTitleSubmission } from "./TitleDrawerComponent";
 import ResetIcon from "../svgIcons/resetIcon";
 import Config from "../config/config";
+import UpvoteIcon from "../svgIcons/upvoteIcon";
+import DownvoteIcon from "../svgIcons/downvoteIcon";
+import { submitVideoBrandingAndHandleErrors } from "../dataFetching";
+import { AnimationUtils } from "../../maze-utils/src/animationUtils";
+import { VideoID } from "../../maze-utils/src/video";
 
 export interface TitleComponentProps {
     submission: RenderedTitleSubmission;
     selected: boolean;
     onSelectOrUpdate: (title: string, oldTitle: string) => void;
     onDeselect: () => void;
+    actAsVip: boolean;
+    videoID: VideoID;
 }
 
 const maxTitleLength = 110;
@@ -35,9 +42,9 @@ export const TitleComponent = (props: TitleComponentProps) => {
                 onClick={() => {
                     const title = titleRef.current!.innerText;
                     props.onSelectOrUpdate(title, title);
+                    setFocused(true);
 
                     if (document.activeElement !== titleRef.current) {
-                        setFocused(true);
                         setSelectionToEnd(titleRef.current!);
                     }
                 }}
@@ -94,8 +101,43 @@ export const TitleComponent = (props: TitleComponentProps) => {
                 }}>
             </span>
 
+            <div className="cbVoteButtons"
+                    style={{ display: !props.selected && !titleChanged && props.submission.votable ? undefined : "none" }}>
+                <button className="cbButton" 
+                    title={chrome.i18n.getMessage("upvote")}
+                    onClick={(e) => {
+                        e.stopPropagation();
+
+                        const stopAnimation = AnimationUtils.applyLoadingAnimation(e.currentTarget, 0.3);
+                        submitVideoBrandingAndHandleErrors(props.submission, null, false, props.actAsVip).then(stopAnimation);
+
+                        const unsubmitted = Config.local!.unsubmitted[props.videoID];
+                        if (unsubmitted) {
+                            const unsubmittedTitle = unsubmitted.titles.find((t) => t.title === props.submission.title);
+                            if (unsubmittedTitle) {
+                                unsubmitted.titles.splice(unsubmitted.titles.indexOf(unsubmittedTitle), 1);
+                                Config.forceLocalUpdate("unsubmitted");
+                            }
+                        }
+                    }}>
+                    <UpvoteIcon/>
+                </button>
+
+                <button className="cbButton" 
+                    title={chrome.i18n.getMessage("downvote")}
+                    onClick={(e) => {
+                        e.stopPropagation();
+
+                        const stopAnimation = AnimationUtils.applyLoadingAnimation(e.currentTarget, 0.3);
+                        submitVideoBrandingAndHandleErrors(props.submission, null, true, props.actAsVip).then(stopAnimation);
+                    }}>
+                    <DownvoteIcon locked={ Config.config!.vip && props.submission.locked }/>
+                </button>
+            </div>
+
             <button className="resetCustomTitle cbButton" 
                 title={chrome.i18n.getMessage("resetCustomTitle")}
+                style={{ display: props.selected && titleChanged ? "block" : "none" }} 
                 onClick={(e) => {
                     e.stopPropagation();
 
@@ -111,7 +153,6 @@ export const TitleComponent = (props: TitleComponentProps) => {
                     }
                 }}>
                 <ResetIcon
-                    style={{ display: props.selected && titleChanged ? "block" : "none" }} 
                     className="resetCustomTitle"
                 />
             </button>

@@ -49,7 +49,7 @@ export interface VideoBrandingInstance {
 }
 
 export const brandingBoxSelector = !onMobile() 
-    ? "ytd-rich-grid-media, ytd-video-renderer, ytd-movie-renderer, ytd-compact-video-renderer, ytd-compact-radio-renderer, ytd-compact-movie-renderer, ytd-playlist-video-renderer, ytd-playlist-panel-video-renderer, ytd-grid-video-renderer, ytd-grid-movie-renderer, ytd-rich-grid-slim-media, ytd-radio-renderer, ytd-reel-item-renderer, ytd-compact-playlist-renderer, ytd-playlist-renderer, ytd-grid-playlist-renderer, ytd-grid-show-renderer"
+    ? "ytd-rich-grid-media, ytd-video-renderer, ytd-movie-renderer, ytd-compact-video-renderer, ytd-compact-radio-renderer, ytd-compact-movie-renderer, ytd-playlist-video-renderer, ytd-playlist-panel-video-renderer, ytd-grid-video-renderer, ytd-grid-movie-renderer, ytd-rich-grid-slim-media, ytd-radio-renderer, ytd-reel-item-renderer, ytd-compact-playlist-renderer, ytd-playlist-renderer, ytd-grid-playlist-renderer, ytd-grid-show-renderer, ytd-structured-description-video-lockup-renderer"
     : "ytm-video-with-context-renderer, ytm-compact-radio-renderer, ytm-reel-item-renderer, ytm-channel-featured-video-renderer, ytm-compact-video-renderer, ytm-playlist-video-renderer, .playlist-immersive-header-content, ytm-compact-playlist-renderer, ytm-video-card-renderer, ytm-vertical-list-renderer, ytm-playlist-panel-video-renderer";
 
 export const watchPageThumbnailSelector = ".ytp-cued-thumbnail-overlay";
@@ -66,13 +66,13 @@ export async function replaceCurrentVideoBranding(): Promise<[boolean, boolean]>
     const possibleSelectors = getPossibleSelectors(onWatchPage, onEmbedPage);
 
     // Find first invisible one, or wait for the first one to be visible
-    const mainTitle = possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility) as HTMLElement).filter((element) => isVisible(element))[0] || 
-        await waitForElement(possibleSelectors[0].selector, !onClipPage) as HTMLElement;
-    const titles = (possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility && !onClipPage)).filter((e) => !!e)) as HTMLElement[];
+    const mainTitle = possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility, true) as HTMLElement).filter((element) => isVisible(element, true))[0] || 
+        await waitForElement(possibleSelectors[0].selector, !onClipPage, true) as HTMLElement;
+    const titles = (possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility && !onClipPage, true)).filter((e) => !!e)) as HTMLElement[];
     const promises: [Promise<boolean>, Promise<boolean>] = [Promise.resolve(false), Promise.resolve(false)]
     const videoID = getVideoID();
 
-    if (videoID !== null && (isVisible(mainTitle) || onClipPage)) {
+    if (videoID !== null && (isVisible(mainTitle, true) || onClipPage)) {
         const videoBrandingInstance = getAndUpdateVideoBrandingInstances(videoID,
             async () => { await replaceCurrentVideoBranding(); });
         const brandingLocation = BrandingLocation.Watch;
@@ -113,6 +113,10 @@ function getPossibleSelectors(onWatchPage: boolean, onEmbedPage: boolean) {
                 },
                 {
                     selector: ".ytp-title-text",
+                    checkVisibility: false
+                },
+                {
+                    selector: "ytd-video-description-header-renderer #shorts-title",
                     checkVisibility: false
                 }
             ];
@@ -272,8 +276,7 @@ export async function extractVideoIDFromElement(element: HTMLElement, brandingLo
 
 function isPlaylistOrClipTitle(element: HTMLElement, link: HTMLAnchorElement) {
     return (link.href?.match(/list=/)?.[0] !== undefined 
-            && link.href?.match(/index=/)?.[0] === undefined
-            && element.nodeName !== "YTD-RICH-GRID-MEDIA")
+            && link.href?.match(/index=/)?.[0] === undefined)
         || link.href?.match(/\/clip\//)?.[0] !== undefined;
 }
 
@@ -418,7 +421,8 @@ export function setupOptionChangeListener(): void {
             "channelOverrides",
             "showIconForFormattedTitles",
             "ignoreAbThumbnails",
-            "showOriginalOnHover"
+            "showOriginalOnHover",
+            "showLiveCover"
         ];
 
         if (settingsToReload.some((name) => (changes[name] && changes[name].newValue !== changes[name].oldValue))) {

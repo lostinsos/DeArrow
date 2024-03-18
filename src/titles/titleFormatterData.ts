@@ -36,7 +36,9 @@ export const titleCaseNotCapitalized = new Set([
 
 export const titleCaseDetectionNotCapitalized = new Set([
     ...titleCaseNotCapitalized,
-    "it"
+    "it",
+    "is",
+    "my"
 ]);
 
 export const allowlistedWords = new Set([
@@ -186,7 +188,45 @@ export const allowlistedWords = new Set([
     "CSGO",
     "SCART",
     "ASMR",
-    "CNBC"
+    "CNBC",
+    "mm",
+    "cm",
+    "m",
+    "km",
+    "ft",
+    "in",
+    "mi",
+    "yd",
+    "kg",
+    "g",
+    "mg",
+    "lb",
+    "lbs",
+    "oz",
+    "mL",
+    "gal",
+    "m/s",
+    "km/h",
+    "mph",
+    "ft/s",
+    "in/s",
+    "lbf",
+    "cal",
+    "kcal",
+    "kW",
+    "Hz",
+    "kHz",
+    "MHz",
+    "GHz",
+    "THz",
+    "Pa",
+    "kPa",
+    "MPa",
+    "GPa",
+    "atm",
+    "mmHg",
+    "torr",
+    "GPA",
 ]);
 
 export const acronymBlocklist = new Set([
@@ -219,7 +259,8 @@ export const acronymBlocklist = new Set([
     "too",
     "bad",
     "big",
-    "all"
+    "all",
+    "old"
 ]);
 
 export const notStartOfSentence = new Set([
