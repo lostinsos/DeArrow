@@ -520,7 +520,10 @@ function getThumbnailBox(image: HTMLElement, brandingLocation: BrandingLocation)
     switch (brandingLocation) {
         case BrandingLocation.Related:
             if (!onMobile()) {
-                return image.closest(getThumbnailSelectors(":not([hidden])")) as HTMLElement;
+                return image.closest([
+                    getThumbnailSelectors(":not([hidden])"),
+                    "ytd-hero-playlist-thumbnail-renderer"]
+                .join(", ")) as HTMLElement;
             } else {
                 return image;
             }
@@ -532,6 +535,15 @@ function getThumbnailBox(image: HTMLElement, brandingLocation: BrandingLocation)
     }
 }
 
+/**
+ * Applies desaturation effect to the supplied thumbnail.
+ *
+ * @param {HTMLImageElement | HTMLElement} thumbnail - The HTML image element or HTML element representing the thumbnail.
+ */
+function applyThumbnailDesaturation(thumbnail: HTMLImageElement | HTMLElement) {
+    thumbnail.style.filter = `grayscale(${((100 - Config.config!.thumbnailSaturationLevel) / 100)})`;
+}
+
 export async function replaceThumbnail(element: HTMLElement, videoID: VideoID, brandingLocation: BrandingLocation,
         showCustomBranding: ShowCustomBrandingInfo, timestamp?: number): Promise<boolean> {
     const thumbnailSelector = getThumbnailSelector(brandingLocation);
@@ -539,6 +551,12 @@ export async function replaceThumbnail(element: HTMLElement, videoID: VideoID, b
         ? element.querySelector(thumbnailSelector) as HTMLImageElement
         : await waitFor(() => element.querySelector(thumbnailSelector) as HTMLImageElement);
     const box = getThumbnailBox(image, brandingLocation);
+
+    if (Config.config!.extensionEnabled) {
+        applyThumbnailDesaturation(image)
+    } else {
+        image.style.removeProperty("filter")
+    }
 
     if (showCustomBranding.knownValue === false || !Config.config!.extensionEnabled 
             || shouldReplaceThumbnailsFastCheck(videoID) === false) {
@@ -575,10 +593,13 @@ export async function replaceThumbnail(element: HTMLElement, videoID: VideoID, b
         const width = objectWidth * window.devicePixelRatio;
         const height = objectHeight * window.devicePixelRatio;
 
-        // TODO: Add option not to hide all thumbnails by default
-        image.style.display = "none";
-        image.classList.remove("cb-visible");
-        resetBackgroundColor(image, brandingLocation);
+        if (Config.config!.hideDetailsWhileFetching) {
+            image.style.display = "none";
+            image.classList.remove("cb-visible");
+            resetBackgroundColor(image, brandingLocation);
+        } else {
+            resetToShowOriginalThumbnail(image, brandingLocation);
+        }
 
         const displayThumbnail = async (thumbnail: HTMLImageElement | HTMLElement, blobUrl: string | null, remoteUrl: string, removeWidth: boolean) => {
             if (blobUrl && thumbnail instanceof HTMLImageElement) thumbnail.src = blobUrl;
@@ -588,6 +609,11 @@ export async function replaceThumbnail(element: HTMLElement, videoID: VideoID, b
             }
 
             thumbnail!.style.removeProperty("display");
+            if (Config.config!.extensionEnabled) {
+                applyThumbnailDesaturation(thumbnail);
+            } else {
+                thumbnail.style.removeProperty("filter");
+            }
             if (!(thumbnail instanceof HTMLImageElement) || thumbnail.complete) {
                 if (removeWidth) thumbnail!.style.removeProperty("width");
                 removeBackgroundColor(image, brandingLocation);
@@ -847,7 +873,28 @@ function resetToShowOriginalThumbnail(image: HTMLImageElement, brandingLocation:
 
 function removeAbThumbnail(image: HTMLImageElement): void {
     if (image.src?.includes?.("_custom_")) {
-        image.src = image.src.replace(/_custom_\d+/, "");
+        const originalSource = image.src;
+        const newSource = image.src
+            .replace(/_custom_\d+/, "")
+            .replace(/\?.+/, "")
+            .replace(/\/\/[^/]+\//, "//i.ytimg.com/");
+
+        const onError = () => {
+            if (image.src === newSource) {
+                // Reset back to original if it failed
+                image.src = originalSource;
+            }
+        };
+        image.addEventListener("error", onError, { once: true });
+        image.addEventListener("load", (e) => {
+            if ((e.target as HTMLImageElement).naturalWidth === 120) {
+                onError();
+            }
+    
+            image.removeEventListener("error", onError);
+        }, { once: true });
+
+        image.src = newSource;
     }
 }
 

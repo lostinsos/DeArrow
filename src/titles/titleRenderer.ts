@@ -32,6 +32,8 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
     if (brandingLocation === BrandingLocation.Watch) {
         const currentWatchPageType = document.URL.includes("watch") ? WatchPageType.Video : WatchPageType.Miniplayer;
 
+        console.log("replacing", videoID, lastWatchVideoID, originalTitleElement.textContent, lastWatchTitle, currentWatchPageType, lastUrlWatchPageType, element)
+
         if (lastWatchVideoID && originalTitleElement?.textContent 
                 && videoID !== lastWatchVideoID && originalTitleElement.textContent === lastWatchTitle
                 && lastUrlWatchPageType === currentWatchPageType) {
@@ -39,14 +41,20 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
             return false;
         }
 
-        lastWatchTitle = originalTitleElement?.textContent ?? "";
-        lastWatchVideoID = videoID;
-        lastUrlWatchPageType = currentWatchPageType;
+        if (lastWatchVideoID !== videoID) {
+            lastWatchTitle = originalTitleElement?.textContent ?? "";
+            lastWatchVideoID = videoID;
+            lastUrlWatchPageType = currentWatchPageType;
+        }
     }
 
-    //todo: add an option to not hide title
-    hideCustomTitle(element, brandingLocation);
-    hideOriginalTitle(element, brandingLocation);
+    if (Config.config!.hideDetailsWhileFetching) {
+        hideCustomTitle(element, brandingLocation);
+        hideOriginalTitle(element, brandingLocation);
+    } else {
+        showOriginalTitle(element, brandingLocation);
+        hideCustomTitle(element, brandingLocation);
+    }
 
     try {
         const titleDataPromise = getVideoTitleIncludingUnsubmitted(videoID, brandingLocation);
@@ -106,6 +114,10 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
         if (originalTitleElement.parentElement?.title) {
             // Inside element should handle title fine
             originalTitleElement.parentElement.title = "";
+        }
+
+        if (!Config.config!.hideDetailsWhileFetching) {
+            hideOriginalTitle(element, brandingLocation);
         }
 
         showCustomTitle(element, brandingLocation);
