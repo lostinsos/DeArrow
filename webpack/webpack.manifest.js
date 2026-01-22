@@ -24,10 +24,13 @@ const schema = {
         pretty: {
             type: 'boolean'
         },
-        steam: {
+        stream: {
             type: 'string'
+        },
+        autoupdate: {
+            type: 'boolean',
         }
-    }  
+    }
 };
 
 class BuildManifest {
@@ -40,6 +43,7 @@ class BuildManifest {
     apply() {
         const distFolder = path.resolve(__dirname, "../dist/");
         const distManifestFile = path.resolve(distFolder, "manifest.json");
+        const [owner, repo_name] = (process.env.GITHUB_REPOSITORY ?? "ajayyy/DeArrow").split("/");
 
         // Add missing manifest elements
         if (this.options.browser.toLowerCase() === "firefox") {
@@ -52,6 +56,7 @@ class BuildManifest {
         }  else if (this.options.browser.toLowerCase() === "safari") {
             mergeObjects(manifest, manifestV2ManifestExtra);
             mergeObjects(manifest, safariManifestExtra);
+            manifest.optional_permissions = manifest.optional_permissions.filter((a) => a !== "*://*/*");
         }
 
         if (this.options.stream === "beta") {
@@ -60,6 +65,10 @@ class BuildManifest {
             if (this.options.browser.toLowerCase() === "firefox") {
                 mergeObjects(manifest, firefoxBetaManifestExtra);
             }
+        }
+
+        if (this.options.autoupdate === true && this.options.browser.toLowerCase() === "firefox") {
+            manifest.browser_specific_settings.gecko.update_url = `https://${owner.toLowerCase()}.github.io/${repo_name}/updates.json`;
         }
 
         let result = JSON.stringify(manifest);

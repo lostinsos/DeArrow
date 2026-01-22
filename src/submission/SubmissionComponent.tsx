@@ -1,14 +1,14 @@
 import * as React from "react";
-import { CustomThumbnailResult, ThumbnailSubmission, isLiveSync } from "../thumbnails/thumbnailData";
-import { getCurrentPageTitle, TitleSubmission } from "../titles/titleData";
+import { CustomThumbnailResult, ThumbnailSubmission } from "../thumbnails/thumbnailData";
+import { TitleSubmission } from "../titles/titleData";
 import { BrandingResult } from "../videoBranding/videoBranding";
 import { ThumbnailType } from "./ThumbnailComponent";
 import { RenderedThumbnailSubmission, ThumbnailDrawerComponent } from "./ThumbnailDrawerComponent";
 import { RenderedTitleSubmission, TitleDrawerComponent } from "./TitleDrawerComponent";
 import { VideoID } from "../../maze-utils/src/video";
-import Config, { UnsubmittedSubmission } from "../config/config";
+import Config, { TitleFormatting, UnsubmittedSubmission } from "../config/config";
 import { addTitleChangeListener, removeTitleChangeListener } from "../utils/titleBar";
-import { toSentenceCase } from "../titles/titleFormatter";
+import { formatTitleInternal } from "../titles/titleFormatter";
 import { BrandingPreviewComponent } from "./BrandingPreviewComponent";
 import { getHash } from "../../maze-utils/src/hash";
 import { sendRequestToServer } from "../utils/requests";
@@ -24,6 +24,12 @@ import { Tooltip } from "../utils/tooltip";
 import { LicenseComponent } from "../license/LicenseComponent";
 import { ToggleOptionComponent } from "../popup/ToggleOptionComponent";
 import { FormattedText } from "../popup/FormattedTextComponent";
+import { isAutoWarningShown } from "./autoWarning";
+import { getAntiTranslatedTitle } from "../titles/titleAntiTranslateData";
+import { isLiveSync } from "../../maze-utils/src/metadataFetcher";
+import { getCurrentPageTitle } from "../../maze-utils/src/elements";
+import { FetchResponse, logRequest } from "../../maze-utils/src/background-request-proxy";
+import { formatJSErrorMessage, getLongErrorMessage } from "../../maze-utils/src/formating";
 
 export interface SubmissionComponentProps {
     videoID: VideoID;
@@ -33,7 +39,7 @@ export interface SubmissionComponentProps {
     submitClicked: (title: TitleSubmission | null, thumbnail: ThumbnailSubmission | null, actAsVip: boolean) => Promise<boolean>;
 }
 
-interface ChatDisplayName {
+export interface ChatDisplayName {
     publicUserID: string;
     username: string | null;
 }
@@ -51,24 +57,33 @@ export const SubmissionComponent = (props: SubmissionComponentProps) => {
             setChatDisplayName(displayName);
 
             const values = ["userName", "deArrowWarningReason"];
-                const result = await sendRequestToServer("GET", "/api/userInfo", {
+            let result: FetchResponse;
+            try {
+                result = await sendRequestToServer("GET", "/api/userInfo", {
                     publicUserID: publicUserID,
                     values
                 });
+            } catch (e) {
+                logError("Caught error while attempting to fetch username and active warnings", e);
+                return;
+            }
 
             if (result.ok) {
                 const userInfo = JSON.parse(result.responseText);
                 username = userInfo.userName;
 
+                setChatDisplayName({
+                    publicUserID,
+                    username
+                });
+
                 if (userInfo.deArrowWarningReason) {
                     createWarningTooltip(userInfo.deArrowWarningReason, displayName);
                 }
+            } else {
+                logRequest(result, "CB", "username and active warnings");
             }
 
-            setChatDisplayName({
-                publicUserID,
-                username
-            });
         }).catch(logError);
     }, []);
 
@@ -78,7 +93,10 @@ export const SubmissionComponent = (props: SubmissionComponentProps) => {
     const [titles, setTitles] = React.useState<RenderedTitleSubmission[]>([]);
     React.useEffect(() => {
         (async () => {
-            const originalTitle = await toSentenceCase(getCurrentPageTitle() || chrome.i18n.getMessage("OriginalTitle"), false);
+            const unformattedOriginalTitle = await getAntiTranslatedTitle(props.videoID)
+                ?? getCurrentPageTitle()
+                ?? chrome.i18n.getMessage("OriginalTitle");
+            const originalTitle = await formatTitleInternal(unformattedOriginalTitle, false, TitleFormatting.SentenceCase, true);
             setOriginalTitle(originalTitle);
 
             const newTitles = [{
@@ -107,7 +125,7 @@ export const SubmissionComponent = (props: SubmissionComponentProps) => {
         })();
     }, []);
 
-    const [actAsVip, setActAsVip] = React.useState(true);
+    const [actAsVip, setActAsVip] = React.useState(Config.config!.actAsVip);
 
     const defaultThumbnails: RenderedThumbnailSubmission[] = [{
         type: ThumbnailType.Original,
@@ -294,6 +312,11 @@ export const SubmissionComponent = (props: SubmissionComponentProps) => {
                                     || props.submissions.titles.findIndex((s) => s.title === t.title) !== -1) {
                                 if (existingSubmission !== -1) {
                                     unsubmitted.titles.splice(existingSubmission, 1);
+
+                                    let index = -1;
+                                    while (index = unsubmitted.titles.findIndex((s) => s.title === oldTitle), index !== -1) {
+                                        unsubmitted.titles.splice(index, 1);
+                                    }
                                 }
                             } else if (t.title !== originalTitle) {
                                 // Normal case
@@ -327,6 +350,7 @@ export const SubmissionComponent = (props: SubmissionComponentProps) => {
                         id="actAsVip"
                         onChange={(value) => {
                             setActAsVip(value);
+                            Config.config!.actAsVip = value;
                         }}
                         value={actAsVip}
                         label={chrome.i18n.getMessage("actAsVip")}
@@ -341,12 +365,17 @@ export const SubmissionComponent = (props: SubmissionComponentProps) => {
                                 || (!selectedThumbnail.current && !selectedTitle) 
                                 || (!!selectedTitle && selectedTitle.title.toLowerCase() === chrome.i18n.getMessage("OriginalTitle").toLowerCase())}
                     onClick={async () => {
+                        if (isAutoWarningShown()) {
+                            alert(chrome.i18n.getMessage("resolveWarningFirst"));
+                            return;
+                        }
+
                         setCurrentlySubmitting(true);
 
                         props.submitClicked(selectedTitle ? {
                             ...selectedTitle,
                             original: selectedTitle.title === getCurrentPageTitle()
-                                        || (!!getCurrentPageTitle() && selectedTitle.title === await toSentenceCase(getCurrentPageTitle()!, false))
+                                        || (!!getCurrentPageTitle() && selectedTitle.title === await formatTitleInternal(getCurrentPageTitle()!, false, TitleFormatting.SentenceCase, true))
                         } : null, selectedThumbnail.current, actAsVip).then((success) => {
                             if (!success) {
                                 setCurrentlySubmitting(false);
@@ -479,7 +508,7 @@ function updateUnsubmitted(unsubmitted: UnsubmittedSubmission,
     }
 }
 
-function getChatDisplayName(chatDisplayName: ChatDisplayName | null): string {
+export function getChatDisplayName(chatDisplayName: ChatDisplayName | null): string {
     if (chatDisplayName) {
         if (chatDisplayName.username && chatDisplayName.username !== chatDisplayName.publicUserID) {
             return `${chatDisplayName.username} - ${chatDisplayName.publicUserID}`;
@@ -494,19 +523,25 @@ function getChatDisplayName(chatDisplayName: ChatDisplayName | null): string {
 function getTips(): React.ReactElement[] {
     const tipInfo = [{
         icon: PersonIcon,
-        text: chrome.i18n.getMessage("tip1")
+        text: chrome.i18n.getMessage("tip1"),
+        forcedFormatting: null,
     }, {
         icon: QuestionIcon,
-        text: chrome.i18n.getMessage("tip2")
+        text: chrome.i18n.getMessage("tip2"),
+        forcedFormatting: null,
     }, {
         icon: ExclamationIcon,
-        text: chrome.i18n.getMessage("tip3")
+        text: chrome.i18n.getMessage("tip3"),
+        forcedFormatting: null,
     }, {
         icon: CursorIcon,
-        text: chrome.i18n.getMessage("tip4")
+        text: chrome.i18n.getMessage("tip4"),
+        forcedFormatting: null,
     }, {
         icon: FontIcon,
-        text: chrome.i18n.getMessage("tip5")
+        text: chrome.i18n.getMessage("tip5"),
+        // let the translators capitalise the tip as needed for the language
+        forcedFormatting: TitleFormatting.Disable,
     }];
 
     return tipInfo.map((tip, i) => (
@@ -515,7 +550,7 @@ function getTips(): React.ReactElement[] {
             <span className="cbTipText">
                 <FormattedText
                     text={tip.text}
-                    titleFormatting={Config.config!.titleFormatting}
+                    titleFormatting={tip.forcedFormatting ?? Config.config!.titleFormatting}
                 />
             </span>
         </div>
@@ -545,16 +580,24 @@ function createWarningTooltip(reason: string, name: ChatDisplayName) {
             buttons: [{
                 name: chrome.i18n.getMessage("GotIt"),
                 listener: async () => {
-                    const result = await sendRequestToServer("POST", "/api/warnUser", {
-                        userID: Config.config!.userID,
-                        enabled: false,
-                        type: 1
-                    });
+                    let result: FetchResponse;
+                    try {
+                        result = await sendRequestToServer("POST", "/api/warnUser", {
+                            userID: Config.config!.userID,
+                            enabled: false,
+                            type: 1
+                        });
+                    } catch (e) {
+                        logError("Caught error while attempting to acknowlege active warning", e);
+                        alert(formatJSErrorMessage(e));
+                        return;
+                    }
 
                     if (result.ok) {
                         tooltip?.close();
                     } else {
-                        alert(`${chrome.i18n.getMessage("warningError")} ${result.status}`);
+                        logRequest(result, "CB", "warning acknowledgement");
+                        alert(getLongErrorMessage(result.status, result.responseText));
                     }
                 }
             }, {

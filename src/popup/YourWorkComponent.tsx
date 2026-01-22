@@ -2,11 +2,13 @@ import * as React from "react";
 import Config, { TitleFormatting } from "../config/config";
 import { sendRequestToServer } from "../utils/requests";
 import { getHash } from "../../maze-utils/src/hash";
-import { getErrorMessage } from "../../maze-utils/src/formating";
+import { formatJSErrorMessage, getShortErrorMessage } from "../../maze-utils/src/formating";
 import PencilIcon from "../svgIcons/pencilIcon";
 import ClipboardIcon from "../svgIcons/clipboardIcon";
 import CheckIcon from "../svgIcons/checkIcon";
 import { FormattedText } from "./FormattedTextComponent";
+import { FetchResponse, logRequest } from "../../maze-utils/src/background-request-proxy";
+import { logError } from "../utils/logger";
 
 interface YourWorkComponentProps {
     titleFormatting?: TitleFormatting;
@@ -19,22 +21,32 @@ export const YourWorkComponent = ({ titleFormatting }: YourWorkComponentProps) =
     const [usernameSubmissionStatus, setUsernameSubmissionStatus] = React.useState("");
     const [titleSubmissionCount, setTitleSubmissionCount] = React.useState("");
     const [thumbnailSubmissionCount, setThumbnailSubmissionCount] = React.useState("");
+    const [casualSubmissionCount, setCasualSubmissionCount] = React.useState("");
 
     React.useEffect(() => {
         (async () => {
-            const values = ["userName", "titleSubmissionCount", "thumbnailSubmissionCount", "vip"];
-            const result = await sendRequestToServer("GET", "/api/userInfo", {
-                publicUserID: await getHash(Config.config!.userID!),
-                values
-            });
+            const values = ["userName", "titleSubmissionCount", "thumbnailSubmissionCount", "casualSubmissionCount", "vip"];
+            let result: FetchResponse;
+            try {
+                result = await sendRequestToServer("GET", "/api/userInfo", {
+                    publicUserID: await getHash(Config.config!.userID!),
+                    values
+                });
+            } catch (e) {
+                logError("Caught error while fetching user info", e);
+                return;
+            }
 
             if (result.ok) {
                 const userInfo = JSON.parse(result.responseText);
                 setUsername(userInfo.userName);
                 setTitleSubmissionCount(userInfo.titleSubmissionCount);
                 setThumbnailSubmissionCount(userInfo.thumbnailSubmissionCount);
+                setCasualSubmissionCount(userInfo.casualSubmissionCount);
 
                 Config.config!.vip = userInfo.vip;
+            } else {
+                logRequest(result, "CB", "user info");
             }
         })();
     }, []);
@@ -62,7 +74,7 @@ export const YourWorkComponent = ({ titleFormatting }: YourWorkComponentProps) =
                         </span>
                     </p>
                     <div id="setUsernameContainer" className={isSettingUsername ? " hidden" : ""}>
-                        <p id="usernameValue">{username}</p>
+                        <p id="usernameValue" className={Config.config!.casualMode ? " usernameWider" : ""}>{username}</p>
                         <button id="setUsernameButton" 
                             title={chrome.i18n.getMessage("setUsername")}
                             onClick={() => {
@@ -97,10 +109,12 @@ export const YourWorkComponent = ({ titleFormatting }: YourWorkComponentProps) =
                                             setUsername(newUsername);
                                             setIsSettingUsername(!isSettingUsername);
                                         } else {
-                                            setUsernameSubmissionStatus(getErrorMessage(result.status, result.responseText));
+                                            logRequest(result, "CB", "username update");
+                                            setUsernameSubmissionStatus(getShortErrorMessage(result.status, result.responseText));
                                         }
                                     }).catch((e) => {
-                                        setUsernameSubmissionStatus(`${chrome.i18n.getMessage("Error")}: ${e}`);
+                                        logError("Caught error while requesting username update", e);
+                                        setUsernameSubmissionStatus(formatJSErrorMessage(e));
                                     });
                                 }
                             }}>
@@ -108,26 +122,36 @@ export const YourWorkComponent = ({ titleFormatting }: YourWorkComponentProps) =
                         </button>
                     </div>
                 </div>
-                {/* Submissions */}
-                <div id="sponsorTimesContributionsContainer" className={isSettingUsername ? " hidden" : ""}>
-                    <p className="u-mZ cb-grey-text">
-                        <FormattedText
-                            langKey="Titles"
-                            titleFormatting={titleFormatting}
-                        />:
-                    </p>
-                    <p id="sponsorTimesContributionsDisplay" className="u-mZ">{titleSubmissionCount}</p>
-                </div>
-                <div id="sponsorTimesContributionsContainer" className={isSettingUsername ? " hidden" : ""}>
-                    <p className="u-mZ cb-grey-text">
-                        <FormattedText
-                            langKey="Thumbnails"
-                            titleFormatting={titleFormatting}
-                        />:
-                    </p>
-                    <p id="sponsorTimesContributionsDisplay" className="u-mZ">{thumbnailSubmissionCount}</p>
-                </div>
+                {
+                    !Config.config!.casualMode &&
+                    <SubmissionCounts
+                        isSettingUsername={isSettingUsername}
+                        titleSubmissionCount={titleSubmissionCount}
+                        thumbnailSubmissionCount={thumbnailSubmissionCount}
+                        titleFormatting={titleFormatting}
+                    />
+                }
             </div>
+            {
+                Config.config!.casualMode &&
+                <div className="sbYourWorkCols">
+                    <SubmissionCounts
+                        isSettingUsername={isSettingUsername}
+                        titleSubmissionCount={titleSubmissionCount}
+                        thumbnailSubmissionCount={thumbnailSubmissionCount}
+                        titleFormatting={titleFormatting}
+                    />
+                    <div id="sponsorTimesContributionsContainer" className={isSettingUsername ? " hidden" : ""}>
+                        <p className="u-mZ cb-grey-text">
+                            <FormattedText
+                                langKey="CasualVotes"
+                                titleFormatting={titleFormatting}
+                            />:
+                        </p>
+                        <p id="sponsorTimesContributionsDisplay" className="u-mZ">{casualSubmissionCount}</p>
+                    </div>
+                </div>
+            }
 
             {
                 Config.config!.countReplacements && getReplacementsMessage()
@@ -137,6 +161,29 @@ export const YourWorkComponent = ({ titleFormatting }: YourWorkComponentProps) =
         </div>
     );
 };
+
+function SubmissionCounts(props: {isSettingUsername: boolean; titleSubmissionCount: string; thumbnailSubmissionCount: string; titleFormatting?: TitleFormatting}): JSX.Element {
+    return <>
+        <div id="sponsorTimesContributionsContainer" className={props.isSettingUsername ? " hidden" : ""}>
+            <p className="u-mZ cb-grey-text">
+                <FormattedText
+                    langKey="Titles"
+                    titleFormatting={props.titleFormatting}
+                />:
+            </p>
+            <p id="sponsorTimesContributionsDisplay" className="u-mZ">{props.titleSubmissionCount}</p>
+        </div>
+        <div id="sponsorTimesContributionsContainer" className={props.isSettingUsername ? " hidden" : ""}>
+            <p className="u-mZ cb-grey-text">
+                <FormattedText
+                    langKey="Thumbnails"
+                    titleFormatting={props.titleFormatting}
+                />:
+            </p>
+            <p id="sponsorTimesContributionsDisplay" className="u-mZ">{props.thumbnailSubmissionCount}</p>
+        </div>
+    </>
+}
 
 function getReplacementsMessage(): JSX.Element {
     const messageParts = chrome.i18n.getMessage("dearrowStatsMessage2")

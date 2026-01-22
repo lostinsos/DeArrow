@@ -14,6 +14,14 @@ let autoplayObserverElement: HTMLElement | null = null;
 let endRecommendationsObserver: MutationObserver | null = null;
 let endRecommendationsObserverElement: HTMLElement | null = null;
 
+// Other endrecommendations format
+let endscreenAutonavObserver: MutationObserver | null = null;
+let endscreenAutonavObserverElement: HTMLElement | null = null;
+let endscreenAutonavSuggestionObserver: MutationObserver | null = null;
+let endscreenAutonavSuggestionObserverElement: HTMLElement | null = null;
+let modernEndRecommendations = false;
+const endRecommendationsCardSelector = ".ytp-videowall-still, .ytp-modern-videowall-still";
+
 let waiting = false;
 let mutationObserver: MutationObserver | null = null;
 let observerElement: HTMLElement | null = null;
@@ -34,7 +42,11 @@ export async function replaceVideoPlayerSuggestionsBranding(): Promise<void> {
 
         const endcardSelector = ".ytp-ce-element";
         const autoplaySelector = ".ytp-autonav-endscreen-countdown-overlay";
-        const endRecommendationsSelector = ".html5-endscreen";
+        const endRecommendationsSelectorModern = ".ytp-fullscreen-grid";
+        const endRecommendationsSelectorOld = ".html5-endscreen:not(.autonav-endscreen)";
+        const autonavSelector = ".html5-endscreen.autonav-endscreen";
+
+        modernEndRecommendations = !!refNode.querySelector(endRecommendationsSelectorModern);
 
         // Setup initial listeners
         {
@@ -50,12 +62,27 @@ export async function replaceVideoPlayerSuggestionsBranding(): Promise<void> {
                 setupAutoplayObserver(initialAutoplayElement);
             }
 
-            const initialEndRecommendationsElement = refNode.querySelector(endRecommendationsSelector) as HTMLElement;
+            const initialEndRecommendationsElement = (modernEndRecommendations
+                ? refNode.querySelector(endRecommendationsSelectorModern)
+                : refNode.querySelector(endRecommendationsSelectorOld)) as HTMLElement;
             if (initialEndRecommendationsElement) {
                 setupRecommendationsObserver(initialEndRecommendationsElement);
-            }
-        }
 
+                if (modernEndRecommendations) {
+                    const elements = initialEndRecommendationsElement.querySelectorAll(endRecommendationsCardSelector);
+                    for (const element of elements) {
+                        setupVideoBrandReplacement(element as HTMLElement, BrandingLocation.EndRecommendations);
+                    }
+                }
+            }
+
+            const initialAutonavElement = refNode.querySelector(autonavSelector) as HTMLElement;
+            if (initialAutonavElement) {
+                setupAutonavObserver(initialAutonavElement);
+                setupAutonavSuggestionsObserver(initialAutonavElement);
+            }
+
+        }
 
         observerElement = refNode as HTMLElement;
         mutationObserver = new MutationObserver((mutations) => {
@@ -72,8 +99,12 @@ export async function replaceVideoPlayerSuggestionsBranding(): Promise<void> {
                         if (node instanceof HTMLElement) {
                             if (node.matches(autoplaySelector)) {
                                 setupAutoplayObserver(node);
-                            } else if (node.matches(endRecommendationsSelector)) {
+                            } else if ((modernEndRecommendations && node.matches(endRecommendationsSelectorModern))
+                                    || (!modernEndRecommendations && node.matches(endRecommendationsSelectorOld))) {
                                 setupRecommendationsObserver(node);
+                            }  else if (node.matches(autonavSelector)) {
+                                setupAutonavSuggestionsObserver(node);
+                                setupAutonavObserver(node);
                             }
                         }
                     }
@@ -178,16 +209,50 @@ export function setupAutoplayObserver(element: HTMLElement): void {
 }
 
 export function setupRecommendationsObserver(element: HTMLElement): void {
-    const refNode = element.querySelector(".ytp-endscreen-content") as HTMLElement;
+    const refNode = element.querySelector(".ytp-endscreen-content, .ytp-fullscreen-grid-stills-container") as HTMLElement;
 
     if (!endRecommendationsObserver || endRecommendationsObserverElement !== element && refNode) {
         if (endRecommendationsObserver) endRecommendationsObserver.disconnect();
 
         endRecommendationsObserverElement = element as HTMLElement;
         endRecommendationsObserver = new MutationObserver((mutations) => observe(mutations,
-            ".ytp-videowall-still", BrandingLocation.EndRecommendations, CheckType.AddedNodes));
+            endRecommendationsCardSelector, BrandingLocation.EndRecommendations, CheckType.AddedNodes));
 
         endRecommendationsObserver.observe(refNode, {
+            childList: true
+        });
+    }
+}
+
+export function setupAutonavObserver(element: HTMLElement): void {
+    const refNode = element.querySelector(".ytp-autonav-endscreen-upnext-container") as HTMLElement;
+    if (!endscreenAutonavObserver || endscreenAutonavObserverElement !== element && refNode) {
+        if (endscreenAutonavObserver) endscreenAutonavObserver.disconnect();
+
+        endscreenAutonavObserverElement = element as HTMLElement;
+        endscreenAutonavObserver = new MutationObserver((mutations) => observe(mutations,
+            ".ytp-autonav-endscreen-upnext-title:not(.cbCustomTitle)", BrandingLocation.EndAutonav,
+            CheckType.Target, ".ytp-autonav-endscreen-link-container"));
+
+        // Sometimes it is one level deep due to the div added to make the show original button work
+        endscreenAutonavObserver.observe(refNode, {
+            childList: true,
+            subtree: true 
+        });
+    }
+}
+
+export function setupAutonavSuggestionsObserver(element: HTMLElement): void {
+    const refNode = element.querySelector(".ytp-suggestions-container") as HTMLElement;
+
+    if (!endscreenAutonavSuggestionObserver || endscreenAutonavSuggestionObserverElement !== element && refNode) {
+        if (endscreenAutonavSuggestionObserver) endscreenAutonavSuggestionObserver.disconnect();
+
+        endscreenAutonavSuggestionObserverElement = element as HTMLElement;
+        endscreenAutonavSuggestionObserver = new MutationObserver((mutations) => observe(mutations,
+            ".ytp-autonav-suggestion-card", BrandingLocation.EndAutonav, CheckType.AddedNodes));
+
+        endscreenAutonavSuggestionObserver.observe(refNode, {
             childList: true
         });
     }
@@ -223,7 +288,8 @@ function setupVideoBrandReplacement(element: HTMLElement, brandingLocation: Bran
     replaceVideoCardBranding(element, brandingLocation).catch(logError);
 
     if (brandingLocation === BrandingLocation.EndRecommendations
-            || brandingLocation === BrandingLocation.EmbedSuggestions) {
+            || brandingLocation === BrandingLocation.EmbedSuggestions
+            || brandingLocation === BrandingLocation.EndAutonav) {
         if (element && !handledElements.has(element)) {
             handledElements.add(element);
             const observer = new MutationObserver((mutations) => {
@@ -309,5 +375,7 @@ export function setupWatchPageBrandingCleanup() {
         mobileControlsObserver?.disconnect?.();
         mobileAutoplayObserver?.disconnect?.();
         mutationObserver?.disconnect?.();
+        endscreenAutonavObserver?.disconnect?.();
+        endscreenAutonavSuggestionObserver?.disconnect?.();
     });
 }

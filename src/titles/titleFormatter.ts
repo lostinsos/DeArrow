@@ -1,7 +1,7 @@
 import { VideoID } from "../../maze-utils/src/video";
 import Config, { TitleFormatting } from "../config/config";
 import { getTitleFormatting, shouldCleanEmojis } from "../config/channelOverrides";
-import { acronymBlocklist, allowlistedWords, notStartOfSentence, titleCaseDetectionNotCapitalized, titleCaseNotCapitalized } from "./titleFormatterData";
+import { acronymBlocklist, allowlistedStartOfWords, allowlistedWords, fancyTextConversions, notStartOfSentence, titleCaseNotCapitalized } from "./titleFormatterData";
 import { chromeP } from "../../maze-utils/src/browserApi";
 import type { LanguageIdentifier } from "cld3-asm";
 
@@ -24,16 +24,20 @@ if (LOAD_CLD) {
  */
 
 export async function formatTitle(title: string, isCustom: boolean, videoID: VideoID | null): Promise<string> {
-    return formatTitleInternal(title, isCustom, await getTitleFormatting(videoID), await shouldCleanEmojis(videoID));
+    return formatTitleInternal(title, isCustom, await getTitleFormatting(videoID), await shouldCleanEmojis(videoID), Config.config!.formatCustomTitles, Config.config!.formatOriginalTitles);
 }
 
 export async function formatTitleDefaultSettings(title: string, isCustom: boolean): Promise<string> {
-    return await formatTitleInternal(title, isCustom, Config.config!.titleFormatting, Config.config!.shouldCleanEmojis);
+    return await formatTitleInternal(title, isCustom, Config.config!.titleFormatting, Config.config!.shouldCleanEmojis, Config.config!.formatCustomTitles, Config.config!.formatOriginalTitles);
 }
 
-export async function formatTitleInternal(title: string, isCustom: boolean, titleFormatting: TitleFormatting, shouldCleanEmojis: boolean): Promise<string> {
+export async function formatTitleInternal(title: string, isCustom: boolean, titleFormatting: TitleFormatting, shouldCleanEmojis: boolean, formatCustomTitles = true, formatOriginalTitles = true): Promise<string> {
     if (shouldCleanEmojis) {
-        title = cleanEmojis(title);
+        title = cleanFancyText(cleanEmojis(title));
+    }
+
+    if ((!formatCustomTitles && isCustom) || (!formatOriginalTitles && !isCustom)) {
+        titleFormatting = TitleFormatting.Disable;
     }
 
     switch (titleFormatting) {
@@ -105,8 +109,9 @@ export async function toSentenceCase(str: string, isCustom: boolean): Promise<st
             result += await capitalizeFirstLetter(word, isTurkiq) + " ";
         } else if (forceKeepFormatting(word)
             || isAcronymStrict(word)
-            || ((!inTitleCase || !isWordCapitalCase(word)) && trustCaps && isAcronym(word))
-            || (!inTitleCase && isWordCapitalCase(word))
+            || ((!inTitleCase || !isWordCapitalCase(word, false)) && trustCaps && isAcronym(word))
+            || (!inTitleCase && trustCaps && word.length === 1)
+            || (!inTitleCase && isWordCapitalCase(word, true))
             || (isCustom && isWordCustomCapitalization(word))
             || (!isAllCaps(word) && isWordCustomCapitalization(word))
             || (!isGreek && await greekLetterAllowed(word))) {
@@ -140,23 +145,118 @@ export async function toTitleCase(str: string, isCustom: boolean): Promise<strin
     let result = "";
     let index = 0;
     for (const word of words) {
+        const processed = await wordToTitleCase(word, index, words, {
+            isCustom,
+            mostlyAllCaps,
+            isGreek,
+            isTurkiq,
+            isEnglish
+        });
+
+        if (processed.length > 0) {
+            result += processed + " ";
+        }
+
+        index++;
+    }
+
+    return cleanResultingTitle(result);
+}
+
+interface WordToTitleCaseParams {
+    isCustom: boolean;
+    mostlyAllCaps: boolean;
+    isGreek: boolean;
+    isTurkiq: boolean;
+    isEnglish: boolean;
+}
+
+async function wordToTitleCase(word: string, index: number, words: string[], params: WordToTitleCaseParams): Promise<string> {
+    const { isCustom, mostlyAllCaps, isGreek, isTurkiq, isEnglish } = params;
+    const trustCaps = shouldTrustCaps(mostlyAllCaps, words, index);
+
+    if (forceKeepFormatting(word)
+        || isYear(word)
+        || (!isGreek && await greekLetterAllowed(word))) {
+        return word;
+    } else if (isCompoundWord(word)) {
+        // If this is hyphenated or dashed, run title case on it again
+        let result = "";
+        let newIndex = 0;
+
+        const wordsInWord = word.split(/([-/])/g);
+        const wordsArray = words.slice(0, index).concat(word.split(/[-/]/)).concat(words.slice(index + 1));
+        for (const wordInWord of wordsInWord) {
+            if (wordInWord.match(/[-/]/)) {
+                result += wordInWord;
+            } else {
+                result += await wordToTitleCase(wordInWord, index + newIndex, wordsArray, {
+                    isCustom,
+                    mostlyAllCaps,
+                    isGreek,
+                    isTurkiq,
+                    isEnglish
+                });
+
+                newIndex++;
+            }
+        }
+
+        return result;
+    } else if ((isCustom && isWordCustomCapitalization(word))
+        || (!isAllCaps(word) && (isWordCustomCapitalization(word) || isNumberThenLetter(word)))) {
+        // For custom titles, allow any not just first capital
+        // For non-custom, allow any that isn't all caps
+        return word;
+    } else if ((!Config.config?.onlyTitleCaseInEnglish || isEnglish)
+        && !startOfSentence(index, words) && !endOfSentence(index, words)
+        && listHasWord(titleCaseNotCapitalized, word.toLowerCase())) {
+        // Skip lowercase check for the first word
+        return await toLowerCase(word, isTurkiq);
+    } else if (isFirstLetterCapital(word) &&
+        ((trustCaps && isAcronym(word)) || isAcronymStrict(word))) {
+        // Trust it with capitalization
+        return word;
+    } else {
+        return await capitalizeFirstLetter(word, isTurkiq);
+    }
+}
+
+export async function toCapitalizeCase(str: string, isCustom: boolean): Promise<string> {
+    const words = str.split(" ");
+    const mostlyAllCaps = isMostlyAllCaps(words);
+    const { isGreek, isTurkiq } = await getLangInfo(str);
+
+    let result = "";
+    let index = 0;
+    for (const word of words) {
         const trustCaps = shouldTrustCaps(mostlyAllCaps, words, index);
 
         if (forceKeepFormatting(word)
-            || (isCustom && isWordCustomCapitalization(word))
-            || (!isAllCaps(word) && (isWordCustomCapitalization(word) || isNumberThenLetter(word)))
             || isYear(word)
             || (!isGreek && await greekLetterAllowed(word))) {
             // For custom titles, allow any not just first capital
             // For non-custom, allow any that isn't all caps
+            // Trust it with capitalization
             result += word + " ";
-        } else if ((!Config.config?.onlyTitleCaseInEnglish || isEnglish)
-                && !startOfSentence(index, words) && !endOfSentence(index, words)
-                    && listHasWord(titleCaseNotCapitalized, word.toLowerCase())) {
-            // Skip lowercase check for the first word
-            result += await toLowerCase(word, isTurkiq) + " ";
-        } else if (isFirstLetterCapital(word) &&
-            ((trustCaps && isAcronym(word)) || isAcronymStrict(word))) {
+        } else if (isCompoundWord(word)) {
+            // If this is hyphenated or dashed, capitalize each part
+            const wordsInWord = word.split(/([-/])/g);
+            for (const wordInWord of wordsInWord) {
+                if (wordInWord.match(/[-/]/)) {
+                    result += wordInWord;
+                } else {
+                    result += await capitalizeFirstLetter(wordInWord, isTurkiq);
+                }
+            }
+
+            result += " ";
+        } else if ((isCustom && isWordCustomCapitalization(word))
+            || (!isAllCaps(word) && isWordCustomCapitalization(word))
+            || (isFirstLetterCapital(word) &&
+                ((trustCaps && isAcronym(word)) || isAcronymStrict(word)))) {
+            // For custom titles, allow any not just first capital
+            // For non-custom, allow any that isn't all caps
             // Trust it with capitalization
             result += word + " ";
         } else {
@@ -169,46 +269,30 @@ export async function toTitleCase(str: string, isCustom: boolean): Promise<strin
     return cleanResultingTitle(result);
 }
 
-export async function toCapitalizeCase(str: string, isCustom: boolean): Promise<string> {
-    const words = str.split(" ");
-    const mostlyAllCaps = isMostlyAllCaps(words);
-    const { isGreek, isTurkiq } = await getLangInfo(str);
-
-    let result = "";
-    for (const word of words) {
-        if (forceKeepFormatting(word)
-            || (isCustom && isWordCustomCapitalization(word))
-            || (!isAllCaps(word) && isWordCustomCapitalization(word))
-            || (isFirstLetterCapital(word) &&
-                ((!mostlyAllCaps && isAcronym(word)) || isAcronymStrict(word)))
-            || isYear(word)
-            || (!isGreek && await greekLetterAllowed(word))) {
-            // For custom titles, allow any not just first capital
-            // For non-custom, allow any that isn't all caps
-            // Trust it with capitalization
-            result += word + " ";
-        } else {
-            result += await capitalizeFirstLetter(word, isTurkiq) + " ";
-        }
-    }
-
-    return cleanResultingTitle(result);
-}
-
 export function isInTitleCase(words: string[]): boolean {
-    let count = 0;
-    let ignored = 0;
+    let first = true;
+    let capitalCount = 0;
     for (const word of words) {
-        if (isWordCapitalCase(word)) {
-            count++;
-        } else if (!isWordAllLower(word) ||
-                listHasWord(titleCaseDetectionNotCapitalized, word.toLowerCase())) {
-            ignored++;
+        const isCaptial = isFirstLetterCapital(word);
+
+        if (!first 
+                && !isCaptial
+                && !doesStartWithNonLetter(word)
+                && !isAllCaps(word)
+                && !listHasWord(titleCaseNotCapitalized, word)
+                && word.length > 3) {
+            // At least one extra word is lower case, probably not title case
+            return false;
         }
+
+        if (isCaptial) {
+            capitalCount++;
+        }
+
+        first = false;
     }
-    
-    const length = words.length - ignored;
-    return (length > 4 && count >= Math.min(length - 1, length * 0.9)) || count >= length;
+
+    return capitalCount > 0;
 }
 
 function shouldTrustCaps(mostlyAllCaps: boolean, words: string[], index: number): boolean {
@@ -261,8 +345,10 @@ export async function capitalizeFirstLetter(word: string, isTurkiq: boolean): Pr
     return result.join("");
 }
 
-function isWordCapitalCase(word: string): boolean {
-    return !!word.match(/^[^\p{L}]*[\p{Lu}][^\p{Lu}]+$/u);
+function isWordCapitalCase(word: string, allowSingleWords: boolean): boolean {
+    const regex = allowSingleWords ? /^[^\p{L}]*[\p{Lu}][^\p{Lu}]*$/u : /^[^\p{L}]*[\p{Lu}][^\p{Lu}]+$/u;
+    const compoundSections = word.split(/[-/]/);
+    return !!word.match(regex) || (compoundSections.length > 1 && word.split(/[-/]/).every((w) => !!w.match(regex)));
 }
 
 function startsWithEmojiLetter(word: string): boolean {
@@ -272,22 +358,20 @@ function startsWithEmojiLetter(word: string): boolean {
 /**
  * Not just capital at start
  */
-function isWordCustomCapitalization(word: string): boolean {
+export function isWordCustomCapitalization(word: string): boolean {
+    if (isCompoundWord(word)) {
+        return word.split(/[-/]/).some((w) => isWordCustomCapitalization(w));
+    }
+
     const capitalMatch = word.match(/[\p{Lu}]/gu);
     if (!capitalMatch) return false;
 
     const capitalNumber = capitalMatch.length;
-    return capitalNumber > 1 || (capitalNumber === 1 && !isFirstLetterCapital(word) && !isHyphenatedFirstLetterCapital(word));
+    return capitalNumber > 1 || (capitalNumber === 1 && !isFirstLetterCapital(word));
 }
 
-/**
- * non-Newtonian
- * Non-Newtonian
- * 
- * If the only capitals are after the dash
- */
-function isHyphenatedFirstLetterCapital(word: string): boolean {
-    return !!word.match(/^[\p{L}]{2,}-[\p{Lu}][\p{Ll}]+$/u);
+function isCompoundWord(word: string): boolean {
+    return !!word.match(/.-.|.\/./);
 }
 
 /**
@@ -297,12 +381,12 @@ function isNumberThenLetter(word: string): boolean {
     return !!word.match(/^[「〈《【〔⦗『〖〘<({["'‘]*[0-9]+\p{L}[〙〗』⦘〕】》〉」)}\]"']*/u);
 }
 
-function isYear(word: string): boolean {
-    return !!word.match(/^[「〈《【〔⦗『〖〘<({["'‘]*[0-9]{2,4}'?s[〙〗』⦘〕】》〉」)}\]"']*$/);
+function doesStartWithNonLetter(word: string): boolean {
+    return !!word.match(/^[^\p{L}]/u);
 }
 
-function isWordAllLower(word: string): boolean {
-    return !!word.match(/^[\p{Ll}]+$/u);
+function isYear(word: string): boolean {
+    return !!word.match(/^[「〈《【〔⦗『〖〘<({["'‘]*[0-9]{2,4}'?s[〙〗』⦘〕】》〉」)}\]"']*$/);
 }
 
 function isFirstLetterCapital(word: string): boolean {
@@ -311,17 +395,24 @@ function isFirstLetterCapital(word: string): boolean {
 
 function forceKeepFormatting(word: string, ignorePunctuation = true): boolean {
     let result = !!word.match(/^>/)
-        || listHasWord(allowlistedWords, word);
+        || listHasWord(allowlistedWords, word)
+        || listHasStartOfWord(allowlistedStartOfWords, word);
 
     if (ignorePunctuation) {
         const withoutPunctuation = word.replace(/[:?.!+\]]+$|^[[+:/]+/, "");
         if (word !== withoutPunctuation) {
-            result ||= listHasWord(allowlistedWords, withoutPunctuation);
+            result ||= listHasWord(allowlistedWords, withoutPunctuation)
+                || listHasStartOfWord(allowlistedStartOfWords, word);
         }
     }
 
     // Allow hashtags
     if (!isAllCaps(word) && word.startsWith("#")) {
+        return true;
+    }
+
+    // Don't capitalize subreddits
+    if (word.startsWith("r/")) {
         return true;
     }
 
@@ -462,7 +553,7 @@ function isDelimeter(word: string): boolean {
     return (isEntirelyDelimeter(word)
         || word.match(/[:?.!\]]$/) !== null)
         && !listHasWord(allowlistedWords, word)
-        && !listHasWord(notStartOfSentence, word)
+        && !listHasWord(notStartOfSentence, word.toLowerCase())
         && (!isAcronymStrict(word) || !word.endsWith("."));
 }
 
@@ -554,10 +645,40 @@ export function cleanEmojis(title: string): string {
     }
 }
 
+export function cleanFancyText(title: string): string {
+    const replacementsNeeded = new Set<[string, string]>();
+    for (const character of title) {
+        const match = fancyTextConversions.get(character);
+        if (match) {
+            replacementsNeeded.add([character, match]);
+        }
+    }
+
+    for (const replacement of replacementsNeeded) {
+        // Allow emoji variation selectors on either side of the replacement character
+        // Supports emojis such as 🅱️
+        title = title.replace(new RegExp(`[\u{fe00}-\u{fe0f}\u{e0100}-\u{e01ef}]?${replacement[0]}[\u{fe00}-\u{fe0f}\u{e0100}-\u{e01ef}]?`
+            , "ug"), replacement[1]);
+    }
+
+    return title.trim();
+}
+
 function listHasWord(list: Set<string>, word: string): boolean {
     return list.has(word.replace(/[[「〈《【〔⦗『〖〘<({:〙〗』⦘〕】》〉」)}\]]/g, ""))
 }
 
+function listHasStartOfWord(list: Set<string>, word: string): boolean {
+    word = word.replace(/[[「〈《【〔⦗『〖〘<({:〙〗』⦘〕】》〉」)}\]]/g, "");
+
+    for (const item of list) {
+        if (word.startsWith(item)) {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 export async function localizeHtmlPageWithFormatting(): Promise<void> {
     // Localize by replacing __MSG_***__ meta tags

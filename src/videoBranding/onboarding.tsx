@@ -6,7 +6,7 @@ import { FormattingOptionsComponent } from "../popup/FormattingOptionsComponent"
 import { Tooltip } from "../utils/tooltip";
 import { BrandingLocation, ShowCustomBrandingInfo, getActualShowCustomBranding } from "./videoBranding";
 import * as CompileConfig from "../../config.json"
-import { isLiveOrUpcoming } from "../thumbnails/thumbnailData";
+import { isLiveOrUpcoming } from "../../maze-utils/src/metadataFetcher";
 
 export async function handleOnboarding(element: HTMLElement, videoID: VideoID,
         brandingLocation: BrandingLocation, showCustomBranding: ShowCustomBrandingInfo, result: [boolean, boolean]): Promise<void> {
@@ -14,7 +14,14 @@ export async function handleOnboarding(element: HTMLElement, videoID: VideoID,
     if (Config.config!.showInfoAboutRandomThumbnails && await getActualShowCustomBranding(showCustomBranding) && element && videoID
             && brandingLocation === BrandingLocation.Related && document.URL === "https://www.youtube.com/"
             && !CompileConfig.debug) {
-        
+
+        if (Config.config!.thumbnailFallback !== Config.syncDefaults.thumbnailFallback
+                || Config.config!.titleFormatting !== Config.syncDefaults.titleFormatting) {
+            // Defaults were already changed
+            Config.config!.showInfoAboutRandomThumbnails = false;
+            return;
+        }
+
         const ignoreTitleChange = Config.config!.titleFormatting === TitleFormatting.Disable;
 
         // Both title and thumbnail changed due to random time or title format
@@ -45,7 +52,7 @@ export async function handleOnboarding(element: HTMLElement, videoID: VideoID,
                     displayTriangle: true,
                     center: true,
                     opacity: 1,
-                    extraClass: "rightSBTriangle",
+                    extraClass: "rightSBTriangle cbOnboarding",
                     elements: [
                         <FormattingOptionsComponent key={0}/>
                     ]

@@ -100,6 +100,7 @@ waitFor(() => Config.isReady()).then(() => {
                 if (!Config.config!.userID) {
                     const newUserID = generateUserID();
                     Config.config!.userID = newUserID;
+                    Config.config!.showInfoAboutCasualMode = false;
                 }
     
                 Config.config!.showInfoAboutRandomThumbnails = true;
@@ -132,7 +133,7 @@ async function isPaywallEnabled(): Promise<boolean> {
             return json.enabled;
         }
     } catch (e) {
-        logError(e);
+        logError("Caught error while checking feature flags", e);
     }
 
     return false;

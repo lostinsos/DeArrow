@@ -8,6 +8,7 @@ import { submitVideoBrandingAndHandleErrors } from "../dataFetching";
 import { AnimationUtils } from "../../maze-utils/src/animationUtils";
 import { VideoID } from "../../maze-utils/src/video";
 import { shouldStoreVotes } from "../utils/configUtils";
+import { showAutoWarningIfRequired } from "./autoWarning";
 
 export interface TitleComponentProps {
     submission: RenderedTitleSubmission;
@@ -45,7 +46,7 @@ export const TitleComponent = (props: TitleComponentProps) => {
         <div className={`cbTitle${props.selected ? " cbTitleSelected" : ""}`}
                 onClick={() => {
                     const title = titleRef.current!.innerText;
-                    props.onSelectOrUpdate(title, title);
+                    props.onSelectOrUpdate(title.trim(), title.trim());
                     setFocused(true);
 
                     if (document.activeElement !== titleRef.current) {
@@ -79,11 +80,13 @@ export const TitleComponent = (props: TitleComponentProps) => {
                     }
                     
                     if (newTitle !== title.current) {
-                        props.onSelectOrUpdate(newTitle, title.current);
+                        props.onSelectOrUpdate(newTitle.trim(), title.current.trim());
                         title.current = newTitle;
     
                         setTitleChanged(newTitle !== props.submission.title);
                         setFocused(true);
+
+                        showAutoWarningIfRequired(newTitle, e.target as HTMLElement);
                     }
                 }}
                 onKeyDown={(e) => {
@@ -178,7 +181,7 @@ export const TitleComponent = (props: TitleComponentProps) => {
                 onClick={(e) => {
                     e.stopPropagation();
 
-                    props.onSelectOrUpdate(props.submission.title, titleRef.current!.innerText);
+                    props.onSelectOrUpdate(props.submission.title.trim(), titleRef.current!.innerText.trim());
                     props.onDeselect();
                     titleRef.current!.innerText = props.submission.title;
                     title.current = props.submission.title;

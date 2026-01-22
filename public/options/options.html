@@ -8,6 +8,8 @@
   <link rel="icon" href="../icons/logo.svg" type="image/png">
   
   <link href="options.css" rel="stylesheet"/>
+  <link href="../shared.css" rel="stylesheet"/>
+  <link href="../casual.css" rel="stylesheet">
 
   <script src="../js/options.js"></script>
 </head>
@@ -72,6 +74,8 @@
 
 			<div id="behavior" class="option-group hidden">
 
+				<div data-type="react-CasualChoiceComponent"></div>
+
 				<div data-type="toggle" data-sync="replaceTitles">
 					<div class="sb-switch-container">
 						<label class="sb-switch">
@@ -135,32 +139,65 @@
 						<option value="4">__MSG_FirstLetterUppercase__</option>
 						<option value="0">__MSG_CapitalizeWords__</option>
 					</select>
-				</div>
 
-				<div data-type="toggle" data-sync="shouldCleanEmojis">
-					<div class="sb-switch-container">
-						<label class="sb-switch">
-							<input id="shouldCleanEmojis" type="checkbox" checked>
-							<span class="sb-slider sb-round"></span>
-						</label>
-						<label class="sb-switch-label" for="shouldCleanEmojis">
-							__MSG_shouldCleanEmojis__
-						</label>
-					</div>
-				</div>
+					<br/>
+					<br/>
 
-				<div data-type="toggle" data-sync="onlyTitleCaseInEnglish" data-dependent-on-selector="titleFormatting" data-dependent-on-selector-value="1">
-					<div class="sb-switch-container">
-						<label class="sb-switch">
-							<input id="onlyTitleCaseInEnglish" type="checkbox" checked>
-							<span class="sb-slider sb-round"></span>
-						</label>
-						<label class="sb-switch-label" for="onlyTitleCaseInEnglish">
-							__MSG_onlyTitleCaseInEnglish__
-						</label>
+					<div data-type="toggle" data-sync="formatOriginalTitles">
+						<div class="sb-switch-container">
+							<label class="sb-switch">
+								<input id="formatOriginalTitles" type="checkbox" checked>
+								<span class="sb-slider sb-round"></span>
+							</label>
+							<label class="sb-switch-label" for="formatOriginalTitles">
+								__MSG_formatOriginalTitles__
+							</label>
+						</div>
 					</div>
 
-					<div class="small-description">__MSG_onlyTitleCaseInEnglishDescription__</div>
+					<br/>
+
+					<div data-type="toggle" data-sync="formatCustomTitles">
+						<div class="sb-switch-container">
+							<label class="sb-switch">
+								<input id="formatCustomTitles" type="checkbox" checked>
+								<span class="sb-slider sb-round"></span>
+							</label>
+							<label class="sb-switch-label" for="formatCustomTitles">
+								__MSG_formatCustomTitles__
+							</label>
+						</div>
+					</div>
+
+					<br/>
+
+					<div data-type="toggle" data-sync="shouldCleanEmojis">
+						<div class="sb-switch-container">
+							<label class="sb-switch">
+								<input id="shouldCleanEmojis" type="checkbox" checked>
+								<span class="sb-slider sb-round"></span>
+							</label>
+							<label class="sb-switch-label" for="shouldCleanEmojis">
+								__MSG_shouldCleanEmojis__
+							</label>
+						</div>
+					</div>
+
+					<br/>
+	
+					<div data-type="toggle" data-sync="onlyTitleCaseInEnglish" data-dependent-on-selector="titleFormatting" data-dependent-on-selector-value="1">
+						<div class="sb-switch-container">
+							<label class="sb-switch">
+								<input id="onlyTitleCaseInEnglish" type="checkbox" checked>
+								<span class="sb-slider sb-round"></span>
+							</label>
+							<label class="sb-switch-label" for="onlyTitleCaseInEnglish">
+								__MSG_onlyTitleCaseInEnglish__
+							</label>
+						</div>
+	
+						<div class="small-description">__MSG_onlyTitleCaseInEnglishDescription__</div>
+					</div>
 				</div>
 
 				<div data-type="selector" data-sync="thumbnailFallback">
@@ -224,6 +261,20 @@
 					</div>
 
 					<div class="small-description">__MSG_hideDetailsWhileFetchingDescription__</div>
+				</div>
+
+				<div data-type="toggle" data-sync="ignoreTranslatedTitles">
+					<div class="sb-switch-container">
+						<label class="sb-switch">
+							<input id="ignoreTranslatedTitles" type="checkbox" checked>
+							<span class="sb-slider sb-round"></span>
+						</label>
+						<label class="sb-switch-label" for="ignoreTranslatedTitles">
+							__MSG_ignoreTranslatedTitles__
+						</label>
+					</div>
+
+					<div class="small-description">__MSG_ignoreTranslatedTitlesDescription__</div>
 				</div>
 
 				<div data-type="number-change" data-sync="titleMaxLines">
@@ -297,6 +348,22 @@
 						<label class="sb-switch-label" for="showOriginalOnHover">
 							__MSG_showOriginalOnHover__
 						</label>
+					</div>
+					
+					<div data-type="toggle" data-sync="showOriginalOnHoverOfVideo" data-dependent-on="showOriginalOnHover">
+						<br/>
+
+						<div class="sb-switch-container">
+							<label class="sb-switch">
+								<input id="showOriginalOnHoverOfVideo" type="checkbox" checked>
+								<span class="sb-slider sb-round"></span>
+							</label>
+							<label class="sb-switch-label" for="showOriginalOnHoverOfVideo">
+								__MSG_showOriginalOnHoverOfVideo__
+							</label>
+						</div>
+
+						<div class="small-description">__MSG_showOriginalOnHoverOfVideoDescription__</div>
 					</div>
 				</div>
 

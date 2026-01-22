@@ -32,13 +32,18 @@
             "icons/logo-64.png",
             "icons/logo-128.png",
             "icons/logo-256.png",
-            "icons/logo-2r.svg"
+            "icons/logo-2r.svg",
+            "icons/logo-casual.svg",
+            "icons/close.png",
+            "icons/add.svg",
+            "icons/remove.svg"
         ],
         "matches": ["<all_urls>"]
     }],
     "host_permissions": [
         "https://sponsor.ajay.app/*",
         "https://dearrow-thumb.ajay.app/*",
+        "https://dearrow.ajay.app/*",
         "https://*.youtube.com/*",
         "https://www.youtube-nocookie.com/embed/*"
     ],

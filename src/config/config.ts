@@ -3,6 +3,7 @@ import { VideoID } from "../../maze-utils/src/video";
 import { ThumbnailSubmission } from "../thumbnails/thumbnailData";
 import { logError } from "../utils/logger";
 import * as CompileConfig from "../../config.json";
+import { casualVoteCategories } from "../submission/casualVote.const";
 
 export interface Permission {
     canSubmit: boolean;
@@ -20,6 +21,7 @@ export interface UnsubmittedTitleSubmission {
 export interface UnsubmittedSubmission {
     thumbnails: UnsubmittedThumbnailSubmission[];
     titles: UnsubmittedTitleSubmission[];
+    casual?: boolean;
 }
 
 export enum TitleFormatting {
@@ -69,6 +71,7 @@ const isEnglish = typeof chrome !== "object" || chrome.i18n.getUILanguage().star
 interface SBConfig {
     userID: string | null;
     vip: boolean;
+    actAsVip: boolean;
     allowExpirements: boolean;
     showDonationLink: boolean;
     showUpsells: boolean;
@@ -79,6 +82,8 @@ interface SBConfig {
     keepUnsubmittedInPrivate: boolean;
     thumbnailSaturationLevel: number;
     titleFormatting: TitleFormatting;
+    formatCustomTitles: boolean;
+    formatOriginalTitles: boolean;
     shouldCleanEmojis: boolean;
     onlyTitleCaseInEnglish: boolean;
     serverAddress: string;
@@ -95,20 +100,30 @@ interface SBConfig {
     defaultToCustom: boolean;
     alwaysShowShowOriginalButton: boolean;
     showOriginalOnHover: boolean;
+    showOriginalOnHoverOfVideo: boolean;
+    showCustomOnHoverIfCasual: boolean;
     importedConfig: boolean;
     replaceTitles: boolean;
     replaceThumbnails: boolean;
     useCrowdsourcedTitles: boolean;
     titleMaxLines: number;
+    casualMode: boolean;
+    casualModeSettings: Record<string, number>;
+    showOriginalThumbWhenCasual: boolean;
+    onlyShowCasualIconForCustom: boolean;
+    formatCasualTitles: boolean;
     channelOverrides: Record<string, ConfigurationID>;
     customConfigurations: Record<ConfigurationID, CustomConfiguration>;
     showInfoAboutRandomThumbnails: boolean;
+    showInfoAboutCasualMode: boolean;
     showIconForFormattedTitles: boolean;
     countReplacements: boolean;
     titleReplacements: number;
     thumbnailReplacements: number;
     ignoreAbThumbnails: boolean;
+    ignoreTranslatedTitles: boolean;
     hideDetailsWhileFetching: boolean;
+    firstThumbnailSubmitted: boolean;
     licenseKey: string | null;
     activated: boolean;
     alreadyActivated: boolean;
@@ -116,10 +131,13 @@ interface SBConfig {
     freeTrialStart: number | null;
     freeTrialEnded: boolean;
     freeAccessRequestStart: number | null;
+    freeTrialDuration: number;
     freeAccessWaitingPeriod: number;
     firefoxOldContentScriptRegistration: boolean;
     lastIncognitoStatus: boolean;
     showActivatedMessage: boolean;
+    confirmGuidelinesCount: number;
+    lastGuidelinesConfirmation: number;
     openMenuKey: Keybind;
     enableExtensionKey: Keybind;
 }
@@ -151,12 +169,18 @@ class ConfigClass extends ProtoConfig<SBConfig, SBStorage> {
 
 // eslint-disable-next-line @typescript-eslint/no-empty-function, @typescript-eslint/no-unused-vars
 function migrateOldSyncFormats(config: SBConfig) {
-    
+    if (config["onlyFormatCustomTitles"]) {
+        config.formatCustomTitles = true;
+        config.formatOriginalTitles = false;
+
+        chrome.storage.sync.remove("onlyFormatCustomTitles").catch(logError);
+    }
 }
 
 const syncDefaults = {
     userID: null,
     vip: false,
+    actAsVip: true,
     allowExpirements: true,
     showDonationLink: true,
     showUpsells: true,
@@ -167,6 +191,8 @@ const syncDefaults = {
     keepUnsubmittedInPrivate: false,
     thumbnailSaturationLevel: 100,
     titleFormatting: isEnglish ? TitleFormatting.TitleCase : TitleFormatting.Disable,
+    formatCustomTitles: true,
+    formatOriginalTitles: true,
     shouldCleanEmojis: true,
     onlyTitleCaseInEnglish: false,
     serverAddress: CompileConfig.serverAddress,
@@ -183,20 +209,30 @@ const syncDefaults = {
     defaultToCustom: true,
     alwaysShowShowOriginalButton: false,
     showOriginalOnHover: false,
+    showOriginalOnHoverOfVideo: false,
+    showCustomOnHoverIfCasual: false,
     importedConfig: false,
     replaceTitles: true,
     replaceThumbnails: true,
     useCrowdsourcedTitles: true,
     titleMaxLines: 3,
+    casualMode: false,
+    casualModeSettings: casualVoteCategories.reduce((acc, { id }) => { acc[id] = 1; return acc; }, {}),
+    showOriginalThumbWhenCasual: false,
+    onlyShowCasualIconForCustom: false,
+    formatCasualTitles: true,
     channelOverrides: {},
     customConfigurations: {},
     showInfoAboutRandomThumbnails: false,
+    showInfoAboutCasualMode: true,
     showIconForFormattedTitles: true,
     countReplacements: true,
     titleReplacements: 0,
     thumbnailReplacements: 0,
     ignoreAbThumbnails: true,
+    ignoreTranslatedTitles: false,
     hideDetailsWhileFetching: true,
+    firstThumbnailSubmitted: false,
     licenseKey: null,
     activated: true,
     alreadyActivated: false,
@@ -204,12 +240,15 @@ const syncDefaults = {
     freeTrialStart: null,
     freeTrialEnded: false,
     freeAccessRequestStart: null,
+    freeTrialDuration: 1000 * 60 * 60 * 6,
     freeAccessWaitingPeriod: 1000 * 60 * 60 * 24 * 3,
     firefoxOldContentScriptRegistration: false,
     lastIncognitoStatus: false,
     showActivatedMessage: false,
+    confirmGuidelinesCount: 0,
+    lastGuidelinesConfirmation: 0,
     openMenuKey: { key: "d", shift: true },
-    enableExtensionKey: { key: "e", shift: true }
+    enableExtensionKey: { key: "e", ctrl: true, shift: true, alt: true }
 };
 
 const localDefaults = {

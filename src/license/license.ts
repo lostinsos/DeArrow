@@ -1,5 +1,7 @@
 import { sendRequestToServer } from "../utils/requests";
 import Config from "../config/config";
+import { FetchResponse } from "../../maze-utils/src/background-request-proxy";
+import { logError } from "../utils/logger";
 
 export function isActivated() {
     return Config.config!.activated 
@@ -11,9 +13,8 @@ export function freeTrialActive() {
     return timeLeft !== null && timeLeft > 0 && !Config.config!.freeTrialEnded;
 }
 
-const freeTrialDuration = 1000 * 60 * 60 * 6;
 export function getFreeTrialTimeLeft() {
-    return Config.config!.freeTrialStart !== null ? freeTrialDuration - (Date.now() - Config.config!.freeTrialStart) : null;
+    return Config.config!.freeTrialStart !== null ? Config.config!.freeTrialDuration - (Date.now() - Config.config!.freeTrialStart) : null;
 }
 
 export function isFreeAccessRequestActive() {
@@ -39,9 +40,15 @@ export async function getLicenseKey(): Promise<string | null> {
 }
 
 async function generateLicenseKey(type: "free") {
-    const result = await sendRequestToServer("GET", `/api/generateToken/${type}`, {
-        key: Date.now()
-    });
+    let result: FetchResponse
+    try {
+        result = await sendRequestToServer("GET", `/api/generateToken/${type}`, {
+            key: Date.now()
+        });
+    } catch (e) {
+        logError("Caught an error while requesting to generate a license key", e);
+        return null;
+    }
 
     if (result.status === 200) {
         const json = JSON.parse(result.responseText);

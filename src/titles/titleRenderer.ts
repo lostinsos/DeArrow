@@ -3,14 +3,16 @@ import Config, { TitleFormatting } from "../config/config";
 import { getVideoTitleIncludingUnsubmitted } from "../dataFetching";
 import { logError } from "../utils/logger";
 import { MobileFix, addNodeToListenFor, getOrCreateTitleButtonContainer } from "../utils/titleBar";
-import { BrandingLocation, ShowCustomBrandingInfo, extractVideoIDFromElement, getActualShowCustomBranding, toggleShowCustom } from "../videoBranding/videoBranding";
+import { BrandingLocation, ShowCustomBrandingInfo, extractVideoIDFromElement, getActualShowCustomBranding, hasCustomTitle, setShowCustomBasedOnDefault, shouldShowCasual, showThreeShowOriginalStages, toggleShowCustom } from "../videoBranding/videoBranding";
 import { cleanEmojis, formatTitle } from "./titleFormatter";
 import { setCurrentVideoTitle } from "./pageTitleHandler";
 import { getTitleFormatting, shouldCleanEmojis, shouldDefaultToCustom, shouldReplaceTitles, shouldReplaceTitlesFastCheck, shouldUseCrowdsourcedTitles } from "../config/channelOverrides";
 import { countTitleReplacement } from "../config/stats";
-import { onMobile } from "../../maze-utils/src/pageInfo";
-import { isFirefoxOrSafari } from "../../maze-utils/src";
+import { isOnV3Extension, onMobile } from "../../maze-utils/src/pageInfo";
+import { isFirefoxOrSafari, waitFor } from "../../maze-utils/src";
 import { isSafari } from "../../maze-utils/src/config";
+import { notificationToTitle, titleToNotificationFormat } from "../videoBranding/notificationHandler";
+import { getAntiTranslatedTitle } from "./titleAntiTranslateData";
 
 enum WatchPageType {
     Video,
@@ -32,17 +34,15 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
     if (brandingLocation === BrandingLocation.Watch) {
         const currentWatchPageType = document.URL.includes("watch") ? WatchPageType.Video : WatchPageType.Miniplayer;
 
-        console.log("replacing", videoID, lastWatchVideoID, originalTitleElement.textContent, lastWatchTitle, currentWatchPageType, lastUrlWatchPageType, element)
-
-        if (lastWatchVideoID && originalTitleElement?.textContent 
-                && videoID !== lastWatchVideoID && originalTitleElement.textContent === lastWatchTitle
+        if (lastWatchVideoID && getOriginalTitleText(originalTitleElement, brandingLocation)
+                && videoID !== lastWatchVideoID && getOriginalTitleText(originalTitleElement, brandingLocation) === lastWatchTitle
                 && lastUrlWatchPageType === currentWatchPageType) {
             // Don't reset it if it hasn't changed videos yet, will be handled by title change listener
             return false;
         }
 
         if (lastWatchVideoID !== videoID) {
-            lastWatchTitle = originalTitleElement?.textContent ?? "";
+            lastWatchTitle = getOriginalTitleText(originalTitleElement, brandingLocation);
             lastWatchVideoID = videoID;
             lastUrlWatchPageType = currentWatchPageType;
         }
@@ -74,17 +74,19 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
         if (!await isOnCorrectVideo(element, brandingLocation, videoID)) return false;
 
         const title = titleData?.title;
-        const originalTitle = originalTitleElement?.textContent?.trim?.() ?? "";
+        const originalTitle = getOriginalTitleText(originalTitleElement, brandingLocation).trim();
         if (title && await shouldUseCrowdsourcedTitles(videoID)
                 // If there are just formatting changes, and the user doesn't want those, don't replace
                 && (await getTitleFormatting(videoID) !== TitleFormatting.Disable || originalTitle.toLowerCase() !== title.toLowerCase())
                 && (await getTitleFormatting(videoID) !== TitleFormatting.Disable 
-                    || await shouldCleanEmojis(videoID) || cleanEmojis(originalTitle.toLowerCase()) !== cleanEmojis(title.toLowerCase()))) {
+                    || await shouldCleanEmojis(videoID) || cleanEmojis(originalTitle.toLowerCase()) !== cleanEmojis(title.toLowerCase()))
+                && (!await shouldShowCasual(videoID, element, showCustomBranding, brandingLocation) 
+                    || (originalTitle.toLowerCase() === title.toLowerCase() && await getTitleFormatting(videoID) !== TitleFormatting.Disable))) {
             const formattedTitle = await formatTitle(title, true, videoID);
             if (!await isOnCorrectVideo(element, brandingLocation, videoID)) return false;
 
-            if (originalTitleElement?.textContent 
-                    && originalTitleElement.textContent.trim() === formattedTitle) {
+            if (getOriginalTitleText(originalTitleElement, brandingLocation) 
+                    && getOriginalTitleText(originalTitleElement, brandingLocation).trim() === formattedTitle) {
                 showOriginalTitle(element, brandingLocation);
                 return false;
             }
@@ -95,25 +97,39 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
             
             setCustomTitle(formattedTitle, element, brandingLocation);
             countTitleReplacement(videoID);
-        } else if (originalTitleElement?.textContent) {
+        } else {
             // innerText is blank when visibility hidden
-            const originalText = originalTitleElement.textContent.trim();
-            const modifiedTitle = await formatTitle(originalText, false, videoID);
-            if (!await isOnCorrectVideo(element, brandingLocation, videoID)) return false;
+            if (getOriginalTitleText(originalTitleElement, brandingLocation).length === 0) {
+                await waitFor(() => originalTitleElement!.textContent!.length > 0, 5000).catch(() => null);
+            }
 
-            if (originalText === modifiedTitle) {
+            if (getOriginalTitleText(originalTitleElement, brandingLocation) 
+                    && (!await shouldShowCasual(videoID, element, showCustomBranding, brandingLocation) || Config.config!.formatCasualTitles)) {
+                const originalText = getOriginalTitleText(originalTitleElement, brandingLocation).trim();
+                const originalTitle = Config.config!.ignoreTranslatedTitles
+                    ? await getAntiTranslatedTitle(videoID) ?? originalText
+                    : originalText;
+                const modifiedTitle = await formatTitle(originalTitle, false, videoID);
+                if (!await isOnCorrectVideo(element, brandingLocation, videoID)) return false;
+    
+                if (originalText === modifiedTitle) {
+                    showOriginalTitle(element, brandingLocation);
+                    return false;
+                }
+                
+                setCustomTitle(modifiedTitle, element, brandingLocation);
+            } else {
                 showOriginalTitle(element, brandingLocation);
                 return false;
             }
-
-            setCustomTitle(modifiedTitle, element, brandingLocation);
-        } else {
-            showOriginalTitle(element, brandingLocation);
         }
-
         if (originalTitleElement.parentElement?.title) {
             // Inside element should handle title fine
             originalTitleElement.parentElement.title = "";
+        }
+        if (originalTitleElement.parentElement?.parentElement?.title) {
+            // Inside element should handle title fine
+            originalTitleElement.parentElement.parentElement.title = "";
         }
 
         if (!Config.config!.hideDetailsWhileFetching) {
@@ -140,8 +156,8 @@ export async function replaceTitle(element: HTMLElement, videoID: VideoID, showC
     }
 }
 
-async function isOnCorrectVideo(element: HTMLElement, brandingLocation: BrandingLocation, videoID: VideoID): Promise<boolean> {
-    return brandingLocation === BrandingLocation.Watch ? getVideoID() === videoID 
+export async function isOnCorrectVideo(element: HTMLElement, brandingLocation: BrandingLocation, videoID: VideoID): Promise<boolean> {
+    return [BrandingLocation.Watch, BrandingLocation.ChannelTrailer].includes(brandingLocation) ? getVideoID() === videoID 
         : await extractVideoIDFromElement(element, brandingLocation) === videoID;
 }
 
@@ -162,17 +178,21 @@ function showOriginalTitle(element: HTMLElement, brandingLocation: BrandingLocat
     const titleElement = getOrCreateTitleElement(element, brandingLocation, originalTitleElement);
     
     titleElement.style.display = "none";
-    if (!originalTitleElement.classList.contains("ta-title-container")) {
-        originalTitleElement.style.setProperty("display", "-webkit-box", "important");
-    } else {
+    if (originalTitleElement.classList.contains("ta-title-container")) {
         // Compatibility with Tube Archivist
         originalTitleElement.style.setProperty("display", "flex", "important");
+    } else if (
+            originalTitleElement.parentElement?.classList.contains("ytd-channel-video-player-renderer")
+            || originalTitleElement.classList.contains("ytp-title-link")) {
+        originalTitleElement.style.removeProperty("display");
+    } else {
+        originalTitleElement.style.setProperty("display", "-webkit-box", "important");
     }
 
     if (Config.config!.showOriginalOnHover) {
         findShowOriginalButton(originalTitleElement, brandingLocation).then((buttonElement) => {
             if (buttonElement) {
-                buttonElement.title = originalTitleElement.textContent ?? "";
+                buttonElement.title = getOriginalTitleText(originalTitleElement, brandingLocation);
             }
         }).catch(logError);
     }
@@ -183,11 +203,11 @@ function showOriginalTitle(element: HTMLElement, brandingLocation: BrandingLocat
                 originalTitleElement.style.setProperty("display", "inline-block", "important");
             }
 
-            setCurrentVideoTitle(originalTitleElement.textContent ?? "");
+            setCurrentVideoTitle(getOriginalTitleText(originalTitleElement, brandingLocation));
             break;
         }
         default: {
-            originalTitleElement.title = originalTitleElement.textContent?.trim() ?? "";
+            originalTitleElement.title = getOriginalTitleText(originalTitleElement, brandingLocation).trim();
             break;
         }
     }
@@ -232,6 +252,25 @@ function setCustomTitle(title: string, element: HTMLElement, brandingLocation: B
     const originalTitleElement = getOriginalTitleElement(element, brandingLocation);
     const titleElement = getOrCreateTitleElement(element, brandingLocation, originalTitleElement);
 
+    if (brandingLocation === BrandingLocation.Notification) {
+        title = titleToNotificationFormat(title, originalTitleElement?.textContent ?? "");
+    } else if (brandingLocation === BrandingLocation.NotificationTitle) {
+        // Need to copy over text that surrounds the title
+        let text = "";
+        for (const child of originalTitleElement.childNodes) {
+            if (child.textContent) {
+                if (text.endsWith(`"`)) {
+                    // We found the title part
+                    text += title;
+                } else {
+                    text += child.textContent;
+                }
+            }
+        }
+
+        title = text;
+    }
+
     // To support extensions like Tube Archivist that add nodes
     const children = titleElement.childNodes;
     if (children.length > 1) {
@@ -268,37 +307,69 @@ export function getOriginalTitleElement(element: HTMLElement, brandingLocation: 
 function getTitleSelector(brandingLocation: BrandingLocation): string[] {
     switch (brandingLocation) {
         case BrandingLocation.Watch:
+            if (!isOnV3Extension()) {
+                return [
+                    "yt-formatted-string", 
+                    ".ytp-title-link.yt-uix-sessionlink",
+                    ".yt-core-attributed-string"
+                ];
+            } else {
+                return [
+                    ".watch-title-text-container"
+                ];
+            }
+        case BrandingLocation.Related:
+            if (!isOnV3Extension()) {
+                return [
+                    "#video-title",
+                    "#movie-title", // Movies in related
+                    "#description #title", // Related videos in description
+                    ".yt-lockup-metadata-view-model-wiz__title .yt-core-attributed-string", // New desktop related
+                    ".yt-lockup-metadata-view-model__title .yt-core-attributed-string", // New desktop related
+                    ".ShortsLockupViewModelHostMetadataTitle .yt-core-attributed-string", // New desktop shorts
+                    ".shortsLockupViewModelHostMetadataTitle .yt-core-attributed-string", // New desktop shorts
+                    ".details .media-item-headline .yt-core-attributed-string", // Mobile YouTube
+                    ".reel-item-metadata h3 .yt-core-attributed-string", // Mobile YouTube Shorts
+                    ".shortsLockupViewModelHostMetadataTitle .yt-core-attributed-string", // Mobile YouTube Shorts
+                    ".details > .yt-core-attributed-string", // Mobile YouTube Channel Feature
+                    ".compact-media-item-headline .yt-core-attributed-string", // Mobile YouTube Compact,
+                    ".amsterdam-playlist-title .yt-core-attributed-string", // Mobile YouTube Playlist Header,
+                    ".autonav-endscreen-video-title .yt-core-attributed-string", // Mobile YouTube Autoplay
+                    ".video-card-title .yt-core-attributed-string", // Mobile YouTube History List
+                    ".YtmCompactMediaItemHeadline .yt-core-attributed-string"
+                ];
+            } else {
+                return [
+                    ".title",
+                    ".yt-uix-tile-link",
+                    ".lohp-video-link"
+                ];
+            }
+        case BrandingLocation.ChannelTrailer:
             return [
                 "yt-formatted-string", 
                 ".ytp-title-link.yt-uix-sessionlink",
-                ".yt-core-attributed-string"
-            ];
-        case BrandingLocation.Related:
-            return [
-                "#video-title",
-                "#movie-title", // Movies in related
-                "#description #title", // Related videos in description
-                ".details .media-item-headline .yt-core-attributed-string", // Mobile YouTube
-                ".reel-item-metadata h3 .yt-core-attributed-string", // Mobile YouTube Shorts
-                ".details > .yt-core-attributed-string", // Mobile YouTube Channel Feature
-                ".compact-media-item-headline .yt-core-attributed-string", // Mobile YouTube Compact,
-                ".amsterdam-playlist-title .yt-core-attributed-string", // Mobile YouTube Playlist Header,
-                ".autonav-endscreen-video-title .yt-core-attributed-string", // Mobile YouTube Autoplay
-                ".video-card-title .yt-core-attributed-string", // Mobile YouTube History List
+                ".yt-core-attributed-string",
+                "a.yt-formatted-string", // Channel trailers
             ];
         case BrandingLocation.Endcards:
             return [".ytp-ce-video-title", ".ytp-ce-playlist-title"];
         case BrandingLocation.Autoplay:
+        case BrandingLocation.EndAutonav:
             return [".ytp-autonav-endscreen-upnext-title"];
         case BrandingLocation.EndRecommendations:
-            return [".ytp-videowall-still-info-title"];
+            return [".ytp-videowall-still-info-title", ".ytp-modern-videowall-still-info-title"];
         case BrandingLocation.EmbedSuggestions:
             return [".ytp-suggestion-title"];
-        case  BrandingLocation.UpNextPreview:
+        case BrandingLocation.UpNextPreview:
             return [
                 ".ytp-tooltip-text-no-title",
                 ".ytp-tooltip-text"
             ];
+        case BrandingLocation.Notification:
+            return [".text yt-formatted-string"]
+        case BrandingLocation.NotificationTitle:
+            return ["yt-formatted-string.title"]
         default:
             throw new Error("Invalid branding location");
     }
@@ -315,16 +386,57 @@ function createTitleElement(element: HTMLElement, originalTitleElement: HTMLElem
             || originalTitleElement.classList.contains("ytp-title-link")
         ? originalTitleElement.cloneNode() as HTMLElement 
         : document.createElement("span");
+
+    if (brandingLocation === BrandingLocation.ChannelTrailer && originalTitleElement.classList.contains("yt-formatted-string")) {
+        // YouTube gets confused and starts using the custom one as original
+        titleElement.className = "";
+
+        titleElement.style.color = "var(--yt-endpoint-visited-color,var(--yt-spec-text-primary))";
+        titleElement.style.textDecoration = "none";
+    }
+
+    switch (brandingLocation) {
+        case BrandingLocation.Notification:
+        case BrandingLocation.NotificationTitle:
+            // For some reason you have to set before removing
+            titleElement.setAttribute("is-empty", "");
+            titleElement.removeAttribute("is-empty");
+            break;
+    }
+    
     titleElement.classList.add("cbCustomTitle");
+
+    const antiTranslateInstalled = document.querySelector(`script[data-ytantitranslatesettings]`);
+    if (antiTranslateInstalled) {
+        titleElement.classList.remove("yt-core-attributed-string");
+
+        if (!Config.config!.ignoreTranslatedTitles) {
+            Config.config!.ignoreTranslatedTitles = true;
+        }
+    }
 
     if (brandingLocation === BrandingLocation.EndRecommendations
             || brandingLocation === BrandingLocation.Autoplay
             || brandingLocation === BrandingLocation.EmbedSuggestions
+            || brandingLocation === BrandingLocation.Notification
+            || brandingLocation === BrandingLocation.EndAutonav
             || originalTitleElement.id === "movie-title"
-            || (originalTitleElement.id === "title" && originalTitleElement.parentElement?.id === "description")) {
+            || (originalTitleElement.id === "title" && originalTitleElement.parentElement?.id === "description")
+            || (isOnV3Extension() && brandingLocation !== BrandingLocation.Watch)) {
         const container = document.createElement("div");
         container.appendChild(titleElement);
-        originalTitleElement.parentElement?.prepend(container);
+
+        if (brandingLocation === BrandingLocation.EndAutonav || isOnV3Extension()) {
+            // Add it in right place
+            originalTitleElement.parentElement?.insertBefore(container, originalTitleElement.nextSibling);
+        } else {
+            originalTitleElement.parentElement?.prepend(container);
+        }
+
+        if (isOnV3Extension()) {
+            container.style.marginRight = getComputedStyle(originalTitleElement).marginRight;
+            originalTitleElement.style.marginRight = "0px";
+        }
 
         // Move original title element over to this element
         container.prepend(originalTitleElement);
@@ -345,7 +457,19 @@ function createTitleElement(element: HTMLElement, originalTitleElement: HTMLElem
             titleElement.parentElement!.style.alignItems = "flex-start";
             if (onMobile()) titleElement.parentElement!.style.alignItems = "normal";
             titleElement.parentElement!.style.justifyContent = "space-between";
-            titleElement.parentElement!.style.width = "100%";
+
+            // For 2024 Oct new UI
+            if (titleElement.parentElement!.classList.contains("yt-lockup-metadata-view-model__title")) {
+                titleElement.parentElement!.classList.add("cbTitle24");
+                titleElement.parentElement!.parentElement!.style.setProperty("--cb-max-height", `calc(${getComputedStyle(titleElement.parentElement!).lineHeight} * ${Math.max(1, Config.config!.titleMaxLines)})`)
+
+                const container = titleElement.closest(".yt-lockup-metadata-view-model__text-container") as HTMLElement;
+                if (container) {
+                    container.style.width = "100%";
+                }
+            } else if (!isOnV3Extension()) {
+                titleElement.parentElement!.style.width = "100%";
+            }
         }
 
         if (brandingLocation === BrandingLocation.Related) {
@@ -402,7 +526,7 @@ function createTitleElement(element: HTMLElement, originalTitleElement: HTMLElem
     return titleElement;
 }
 
-export async function hideAndUpdateShowOriginalButton(element: HTMLElement, brandingLocation: BrandingLocation,
+export async function hideAndUpdateShowOriginalButton(videoID: VideoID, element: HTMLElement, brandingLocation: BrandingLocation,
         showCustomBranding: ShowCustomBrandingInfo, dontHide: boolean): Promise<void> {
     const originalTitleElement = getOriginalTitleElement(element, brandingLocation);
     const buttonElement = await findShowOriginalButton(originalTitleElement, brandingLocation);
@@ -411,10 +535,21 @@ export async function hideAndUpdateShowOriginalButton(element: HTMLElement, bran
         if (buttonImage) {
             if (await getActualShowCustomBranding(showCustomBranding)) {
                 buttonImage.classList.remove("cbOriginalShown");
-                buttonElement.title = chrome.i18n.getMessage("ShowOriginal");
+                if (await showThreeShowOriginalStages(videoID, originalTitleElement, brandingLocation)
+                        && await shouldShowCasual(videoID, element, showCustomBranding, brandingLocation)
+                        && await hasCustomTitle(videoID, element, brandingLocation)) {
+                    buttonElement.title = chrome.i18n.getMessage("ShowModified");
+                } else {
+                    buttonElement.title = chrome.i18n.getMessage("ShowOriginal");
+                }
             } else {
                 buttonImage.classList.add("cbOriginalShown");
-                buttonElement.title = chrome.i18n.getMessage("ShowModified");
+                if (!await showThreeShowOriginalStages(videoID, originalTitleElement, brandingLocation)
+                        && await hasCustomTitle(videoID, element, brandingLocation)) {
+                    buttonElement.title = chrome.i18n.getMessage("ShowModified");
+                } else {
+                    buttonElement.title = chrome.i18n.getMessage("ShowFormatted");
+                }
             }
 
             const isDefault = showCustomBranding.knownValue === null 
@@ -442,7 +577,7 @@ export async function findOrCreateShowOriginalButton(element: HTMLElement, brand
         videoID: VideoID): Promise<HTMLElement> {
     const originalTitleElement = getOriginalTitleElement(element, brandingLocation);
     const buttonElement = await findShowOriginalButton(originalTitleElement, brandingLocation) 
-        ?? await createShowOriginalButton(originalTitleElement, brandingLocation, videoID);
+        ?? await createShowOriginalButton(element, originalTitleElement, brandingLocation, videoID);
 
     buttonElement.setAttribute("videoID", videoID);
     buttonElement.style.removeProperty("display");
@@ -453,7 +588,7 @@ export async function findOrCreateShowOriginalButton(element: HTMLElement, brand
     return buttonElement;
 }
 
-async function createShowOriginalButton(originalTitleElement: HTMLElement,
+async function createShowOriginalButton(element: HTMLElement, originalTitleElement: HTMLElement,
         brandingLocation: BrandingLocation, videoID: VideoID): Promise<HTMLElement> {
     const buttonElement = document.createElement("button");
     // Style set here for when css disappears during updates
@@ -492,29 +627,38 @@ async function createShowOriginalButton(originalTitleElement: HTMLElement,
 
     const getHoverPlayers = () => [
         originalTitleElement.closest("#dismissible")?.querySelector?.("#mouseover-overlay") as HTMLElement,
-        document.querySelector("ytd-video-preview #player-container") as HTMLElement
+        document.querySelector("ytd-video-preview") as HTMLElement
     ];
 
-    const toggleDetails = async () => {
-        const videoID = buttonElement.getAttribute("videoID");
-        if (videoID) {
-            await toggleShowCustom(videoID as VideoID);
-
-            // Hide hover play, made visible again when mouse leaves area
-            for (const player of getHoverPlayers()) {
-                if (player) {
-                    player.style.display = "none";
-                    const hoverPlayerVideo = player.querySelector("video");
-                    if (hoverPlayerVideo) {
-                        hoverPlayerVideo.pause();
-                    }
+    const hideHoverPlayers = () => {
+        // Hide hover play, made visible again when mouse leaves area
+        for (const player of getHoverPlayers()) {
+            if (player) {
+                player.style.display = "none";
+                const hoverPlayerVideo = player.querySelector("video");
+                if (hoverPlayerVideo) {
+                    hoverPlayerVideo.pause();
                 }
             }
+        }
+    };
+
+    const toggleDetails = async (value?: boolean) => {
+        const videoID = buttonElement.getAttribute("videoID");
+        if (videoID) {
+            if (value === undefined) {
+                await toggleShowCustom(videoID as VideoID, originalTitleElement, brandingLocation);
+            } else {
+                await setShowCustomBasedOnDefault(videoID as VideoID, originalTitleElement, brandingLocation, value);
+            }
+
+            hideHoverPlayers();
         }
     }
 
     buttonElement.addEventListener("click", (e) => void (async (e) => {
-        if (!Config.config!.showOriginalOnHover) {
+        if (!Config.config!.showOriginalOnHover
+                || await showThreeShowOriginalStages(videoID, originalTitleElement, brandingLocation)) {
             e.preventDefault();
             e.stopPropagation();
 
@@ -523,16 +667,39 @@ async function createShowOriginalButton(originalTitleElement: HTMLElement,
     })(e));
 
     buttonElement.addEventListener("mouseenter", () => void (async () => {
-        if (Config.config!.showOriginalOnHover) {
-            await toggleDetails();
+        if (Config.config!.showOriginalOnHover && !Config.config!.showOriginalOnHoverOfVideo) {
+            await toggleDetails(false);
+        }
+    })());
+    buttonElement.addEventListener("mouseleave", () => void (async () => {
+        if (Config.config!.showOriginalOnHover && !Config.config!.showOriginalOnHoverOfVideo) {
+            await toggleDetails(true);
         }
     })());
 
-    buttonElement.addEventListener("mouseleave", () => void (async () => {
-        if (Config.config!.showOriginalOnHover) {
-            await toggleDetails();
+    element.addEventListener("mouseenter", () => void (async () => {
+        if (!chrome.runtime?.id) return; // Extension context invalidated
+
+        if (Config.config!.showOriginalOnHover && Config.config!.showOriginalOnHoverOfVideo) {
+            await toggleDetails(false);
         }
     })());
+    element.addEventListener("mouseleave", () => void (async () => {
+        if (!chrome.runtime?.id) return; // Extension context invalidated
+
+        if (Config.config!.showOriginalOnHover && Config.config!.showOriginalOnHoverOfVideo) {
+            await toggleDetails(true);
+        }
+    })());
+    if (Config.config!.showOriginalOnHover && Config.config!.showOriginalOnHoverOfVideo) {
+        element.addEventListener("mousemove", () => {
+            if (!chrome.runtime?.id) return; // Extension context invalidated
+
+            if (Config.config!.showOriginalOnHover && Config.config!.showOriginalOnHoverOfVideo) {
+                hideHoverPlayers();
+            }
+        });
+    }
 
     if (originalTitleElement.parentElement) {
         originalTitleElement.parentElement.addEventListener("mouseleave", () => {
@@ -571,6 +738,7 @@ async function createShowOriginalButton(originalTitleElement: HTMLElement,
 
         if (brandingLocation === BrandingLocation.Endcards) {
             buttonElement.style.margin = originalStyle.margin;
+            buttonElement.style.marginLeft = "0px";
         }
 
         // Verify again it doesn't already exist
@@ -580,7 +748,11 @@ async function createShowOriginalButton(originalTitleElement: HTMLElement,
             return existingButton as HTMLElement;
         }
 
-        originalTitleElement.parentElement?.appendChild(buttonElement);
+        if (brandingLocation === BrandingLocation.NotificationTitle) {
+            originalTitleElement.parentElement?.insertBefore(buttonElement, originalTitleElement.nextSibling);
+        } else {
+            originalTitleElement.parentElement?.appendChild(buttonElement);
+        }
     }
 
     if (onMobile()) {
@@ -589,7 +761,7 @@ async function createShowOriginalButton(originalTitleElement: HTMLElement,
         buttonElement.classList.add("cbMobile");
 
         // Add hover to show
-        const box = buttonElement.closest(".details, .compact-media-item-metadata, .reel-item-metadata");
+        const box = buttonElement.closest(".details, .compact-media-item-metadata, .reel-item-metadata, .shortsLockupViewModelHost, .YtmCompactMediaItemMetadata");
         if (box) {
             let readyToHide = false;
             box.addEventListener("touchstart", () => {
@@ -623,4 +795,27 @@ async function createShowOriginalButton(originalTitleElement: HTMLElement,
     }
 
     return buttonElement;
+}
+
+function getOriginalTitleText(originalTitleElement: HTMLElement, brandingLocation: BrandingLocation): string {
+    switch (brandingLocation) {
+        case BrandingLocation.Notification:
+            return notificationToTitle(originalTitleElement?.textContent ?? "");
+        case BrandingLocation.NotificationTitle: {
+            // Look for quotation marks
+            let foundFirstQuote = false;
+            for (const child of originalTitleElement.childNodes) {
+                if (foundFirstQuote) {
+                    return child.textContent ?? "";
+                } else if (child.textContent?.endsWith(`"`)) {
+                    foundFirstQuote = true;
+                }
+            }
+
+            // Found nothing, treat full title as original title then
+            return originalTitleElement?.textContent ?? "";
+        }
+        default:
+            return originalTitleElement?.textContent ?? "";
+    }
 }

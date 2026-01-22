@@ -1,7 +1,7 @@
 import * as React from "react";
 import { drawCenteredToCanvas, renderThumbnail, setupPreRenderedThumbnail } from "../thumbnails/thumbnailRenderer";
 import { waitFor } from "../../maze-utils/src"
-import { VideoID } from "../../maze-utils/src/video";
+import { getCurrentTime, verifyCurrentTime, VideoID } from "../../maze-utils/src/video";
 import { ThumbnailSubmission } from "../thumbnails/thumbnailData";
 import { logError } from "../utils/logger";
 import { isFirefoxOrSafari } from "../../maze-utils/src";
@@ -80,14 +80,15 @@ export const ThumbnailComponent = (props: ThumbnailComponentProps) => {
 
             if (props.type === ThumbnailType.SpecifiedTime) {
                 canvasRef.current?.getContext("2d")?.clearRect(0, 0, canvasRef.current?.width, canvasRef.current?.height);
-                if (props.video.paused && props.time === props.video.currentTime) {
+                if (props.video.paused && props.time === getCurrentTime()) {
                     // Skip rendering and just use existing video frame
                     renderCurrentFrame(props, canvasRef, inRenderingLoop, false, true);
                 } else {
                     renderThumbnail(props.videoID, canvasWidth, canvasHeight, false, props.time!, false, true).then((rendered) => {
                         waitFor(() => canvasRef?.current).then(async () => {
                             if (rendered && !cancelled) {
-                                const imageBitmap = await createImageBitmap(rendered.blob);
+                                const blob = await new Response(rendered.blobUrl).blob();
+                                const imageBitmap = await createImageBitmap(blob);
 
                                 drawCenteredToCanvas(canvasRef.current!, canvasRef.current!.width, canvasRef.current!.height,
                                     imageBitmap.width, imageBitmap.height, imageBitmap);
@@ -115,11 +116,16 @@ export const ThumbnailComponent = (props: ThumbnailComponentProps) => {
                         if (submitted) return;
                         submitted = true;
 
+                        if (props.type === ThumbnailType.CurrentTime) {
+                            // To handle server-side ads
+                            verifyCurrentTime();
+                        }
+
                         props.onClick?.(props.type === ThumbnailType.Original ? {
                             original: true
                         } : {
                             original: false,
-                            timestamp: props.type === ThumbnailType.CurrentTime ? props.video.currentTime : props.time!
+                            timestamp: props.type === ThumbnailType.CurrentTime ? (getCurrentTime() || 0) : props.time!
                         });
                     }
 
@@ -186,7 +192,7 @@ async function renderCurrentFrame(props: ThumbnailComponentProps,
         if (cacheThumbnail) {
             canvasRef.current!.toBlob((blob) => {
                 if (blob) {
-                    setupPreRenderedThumbnail(props.videoID, props.time!, blob);
+                    setupPreRenderedThumbnail(props.videoID, props.time!, URL.createObjectURL(blob), canvasRef.current!.width, canvasRef.current!.height);
                 } else {
                     logError(`Failed to cache thumbnail for ${props.videoID} at ${props.time}`);
                 }

@@ -1,5 +1,5 @@
 import { TitleFormatting } from "../src/config/config";
-import { capitalizeFirstLetter, cleanPunctuation, formatTitleInternal, isAcronym, isAcronymStrict, isInTitleCase, isMostlyAllCaps, toCapitalizeCase, toSentenceCase, toTitleCase } from "../src/titles/titleFormatter";
+import { capitalizeFirstLetter, cleanFancyText, cleanPunctuation, formatTitleInternal, isAcronym, isAcronymStrict, isInTitleCase, isMostlyAllCaps, toCapitalizeCase, toSentenceCase, toTitleCase } from "../src/titles/titleFormatter";
 
 describe("Acronym Tests", () => {
     const acronymCases: [string, boolean][] = [
@@ -68,6 +68,11 @@ describe("isInTitleCase", () => {
     const inTitleCaseCases: [string[], boolean][] = [
         [["Go", "on", "the", "Table", "with", "a", "Cat"], true],
         [["Go", "on", "the", "table", "with", "a", "cat"], false],
+        [["Go", "On", "The", "Table", "With", "A", "cAtt"], false],
+        [["Go", "On", "The", "Table", "With", "A", "Catt"], true],
+        [["go", "on", "the", "table", "with", "a", "cat"], false],
+        [["GG", "On", "The", "5", "Wi", "A", "Cat"], true],
+        [["Beating", "Pokemon", "Ruby/Sapphire", "with", "just", "a", "Zubat"], false],
     ];
     for (const testCase of inTitleCaseCases) {
         const [input, expected] = testCase;
@@ -81,6 +86,15 @@ describe("toCapitalizeCase", () => {
     const capitalizeCases: [string, string][] = [
         ["Go on the table with a cat", "Go On The Table With A Cat"],
         ["Go on the Table with a Cat", "Go On The Table With A Cat"],
+        ["The quick brown fox jumps over the lazy/sleepy dog is a sentence", "The Quick Brown Fox Jumps Over The Lazy/Sleepy Dog Is A Sentence"],
+        ["The quick brown fox jumps over the lazy/Sleepy dog is a sentence", "The Quick Brown Fox Jumps Over The Lazy/Sleepy Dog Is A Sentence"],
+        ["The quick brown fox jumps OVER THE LAZY/SLEEPY DOG is a sentence", "The Quick Brown Fox Jumps Over The Lazy/Sleepy Dog Is A Sentence"],
+        ["The quick brown fox jumps over the lazy/SLEEPY dog is a sentence", "The Quick Brown Fox Jumps Over The Lazy/Sleepy Dog Is A Sentence"],
+        ["The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence", "The Quick Brown Fox Jumps Over The Lazy/Sleepy Dog Is A Sentence"],
+        ["The quick brown fox jumps over the lazy/first-of-it's-kind dog is a sentence", "The Quick Brown Fox Jumps Over The Lazy/First-Of-It's-Kind Dog Is A Sentence"],
+        ["The quick brown fox jumps over the first-of-it's-kind is a sentence", "The Quick Brown Fox Jumps Over The First-Of-It's-Kind Is A Sentence"],
+        ["The quick brown fox jumps over the first-of-it's-Kind is a sentence", "The Quick Brown Fox Jumps Over The First-Of-It's-Kind Is A Sentence"],
+        ["The quick brown fox jumps over the first-of-it's-kInd is a sentence", "The Quick Brown Fox Jumps Over The First-Of-It's-Kind Is A Sentence"],
     ];
     for (const testCase of capitalizeCases) {
         const [input, expected] = testCase;
@@ -134,6 +148,17 @@ describe("toTitleCase", () => {
         ["Pandora Hearts pocket watch of real life with lacie melody edited of - an important thing", "Pandora Hearts Pocket Watch of Real Life with Lacie Melody Edited Of - An Important Thing"],
         // in is inch so is allowlisted unless manually capitalized
         ["Pandora Hearts pocket watch in real life with lacie melody edited In", "Pandora Hearts Pocket Watch in Real Life with Lacie Melody Edited In"],
+        ["The quick brown fox jumps over the lazy/sleepy dog is a sentence", "The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence"],
+        ["The quick brown fox jumps over the lazy/Sleepy dog is a sentence", "The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence"],
+        ["The quick brown fox jumps OVER THE LAZY/SLEEPY DOG is a sentence", "The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence"],
+        ["The quick brown fox jumps over the lazy/SLEEPY dog is a sentence", "The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence"],
+        ["The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence", "The Quick Brown Fox Jumps Over the Lazy/Sleepy Dog Is a Sentence"],
+        ["The quick brown fox jumps over the lazy/first-of-it's-kind dog is a sentence", "The Quick Brown Fox Jumps Over the Lazy/First-of-It's-Kind Dog Is a Sentence"],
+        ["The quick brown fox jumps over the first-of-it's-kind is a sentence", "The Quick Brown Fox Jumps Over the First-of-It's-Kind Is a Sentence"],
+        ["The quick brown fox jumps over the first-of-it's-Kind is a sentence", "The Quick Brown Fox Jumps Over the First-of-It's-Kind Is a Sentence"],
+        ["The quick brown fox jumps over the first-of-it's-kInd is a sentence", "The Quick Brown Fox Jumps Over the First-of-It's-kInd Is a Sentence"],
+        ["The quick brown fox jumps over the go-to dog is a sentence", "The Quick Brown Fox Jumps Over the Go-to Dog Is a Sentence"],
+        ["The quick brown fox jumps over the go-word dog is a sentence", "The Quick Brown Fox Jumps Over the Go-Word Dog Is a Sentence"],
     ];
     for (const testCase of titleCases) {
         const [input, expected] = testCase;
@@ -151,16 +176,23 @@ describe("toTitleCase cleanEmojis", () => {
         ["5 min countdown timer (roller🎢🎢🎢coaster) 🎢", "5 Min Countdown Timer (Roller Coaster)"],
         ["5 min countdown timer (roller🎢🛠️🎢coaster) 🎢", "5 Min Countdown Timer (Roller Coaster)"],
         [" 🎢  🎢🎢 🎢🎢\t🎢", "🎢 🎢🎢 🎢🎢\t🎢"], // Leave emojis when there is no text
-        ["Rush 🅱️", "Rush 🅱️"],
-        ["5 min countdown timer (roller🎢🅱️oaster) 🎢", "5 Min Countdown Timer (Roller 🅱️oaster)"],
-        ["5 min countdown 🎢🅱️🎢🎢 timer (roller coaster) 🎢", "5 Min Countdown 🅱️ Timer (Roller Coaster)"],
-        ["🎢🅱️🎢🎢 5 min countdown timer (roller coaster) 🎢", "🅱️ 5 Min Countdown Timer (Roller Coaster)"],
+        ["Rush 🅱️", "Rush B"],
+        ["5 min countdown timer (roller🎢🅱️oaster) 🎢", "5 Min Countdown Timer (Roller Boaster)"],
+        ["5 min countdown 🎢🅱️🎢🎢 timer (roller coaster) 🎢", "5 Min Countdown B Timer (Roller Coaster)"],
+        ["🎢🅱️🎢🎢 5 min countdown timer (roller coaster) 🎢", "B 5 Min Countdown Timer (Roller Coaster)"],
         ["🛠️ How You Can Repair Your Things", "How You Can Repair Your Things"],
         ["🏳️‍🌈🏳️‍🌈🏳️‍🌈 5 min countdown timer🏳️‍🌈 🏳️‍🌈🏳️‍🌈🏳️‍🌈 (roller🏳️‍🌈🏳️‍🌈🏳️‍🌈coaster) 🏳️‍🌈", "5 Min Countdown Timer (Roller Coaster)"],
         ["5 min countdown 👷🏾‍♀️👷🏾‍♀️👷🏾‍♀️ timer (roller👷🏾‍♀️👷🏾‍♀️👷🏾‍♀️coaster) 👷🏾‍♀️", "5 Min Countdown Timer (Roller Coaster)"],
         ["5 min countdown 👩🏽‍👨🏽‍👦🏽‍👦🏽 timer (roller👩🏽‍👨🏽‍👦🏽‍👦🏽👩🏽‍👨🏽‍👦🏽‍👦🏽coaster) 👩🏽‍👨🏽‍👦🏽‍👦🏽👩🏽‍👨🏽‍👦🏽‍👦🏽", "5 Min Countdown Timer (Roller Coaster)"],
         ["😀︎😀︎😀︎ 5 min countdown timer😀︎ 😀︎😀︎😀︎ (roller😀︎😀︎😀︎coaster) 😀︎", "5 Min Countdown Timer (Roller Coaster)"],
         ["STAR☆T☆RAIN -New Arrange Ver.-", "Star T Rain -New Arrange Ver.-"],
+        ["𝐆𝐀𝐋𝐓 𝐒𝐔𝐁 𝐓𝐑𝐀𝐈𝐍𝐒 Railfan Mini-Meetup at Leaside", "Galt Sub Trains Railfan Mini-Meetup at Leaside"],
+        ["Every Glitch in Super Mario Odyssey ᵃˡᵐᵒˢᵗ", "Every Glitch in Super Mario Odyssey Almost"],
+        ["A word with all the letters ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ", "A Word with All the Letters Abcdefghijklmnoprstuvwxyz"],
+        ["A word with all the letters ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘꞯʀꜱᴛᴜᴠᴡʏᴢ", "A Word with All the Letters Abcdefghijklmnopqrstuvwyz"],
+        ["A word with all the letters 𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳", "A Word with All the Letters Abcdefghijklmnopqrstuvwxyz"],
+        ["A word with all the letters ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ", "A Word with All the Letters Abcdefghijklmnopqrstuvwxyz"],
+        ["What Everyone Gets Wrong About E=mc²", "What Everyone Gets Wrong About E=mc²"],
     ];
     for (const testCase of titleCases) {
         const [input, expected] = testCase;
@@ -215,6 +247,10 @@ describe("toSentenceCase", () => {
         ["One thing: then another thing", "One thing: Then another thing"],
         ["One thing: but-then another thing", "One thing: But-then another thing"],
         ["Why I Won't Buy Into The Tesla Cybertruck Hype When my Alternative is Much More Fun", "Why I won't buy into the tesla cybertruck hype when my alternative is much more fun"],
+        ["Thorzone Nano Q case review", "Thorzone Nano Q case review"],
+        ["1984 Mercedes-Benz 500SEC review", "1984 Mercedes-Benz 500SEC review"],
+        ["If Trump isn’t dying, why is he being treated like a Make-A-Wish kid?", "If Trump isn’t dying, why is he being treated like a Make-A-Wish kid?"],
+        ["If Trump isn’t dying, why is he being treated like a MAKE-A-WISH kid?", "If Trump isn’t dying, why is he being treated like a make-a-wish kid?"],
     ];
     for (const testCase of sentenceCases) {
         const [input, expected] = testCase;
@@ -225,10 +261,13 @@ describe("toSentenceCase", () => {
 });
 
 describe("toSentenceCase cleanEmojis", () => {
-    const titleCases: [string, string][] = [
+    const sentenceCases: [string, string][] = [
         ["🚨 Announcement: New Series Coming!", "Announcement: New series coming"],
+        ["𝐆𝐀𝐋𝐓 𝐒𝐔𝐁 𝐓𝐑𝐀𝐈𝐍𝐒 Railfan Mini-Meetup at Leaside", "Galt sub trains railfan mini-meetup at leaside"],
+        ["The country of 🇨🇦 exists", "The country of 🇨🇦 exists"],
+        ["𝗧𝗘𝗧𝗥𝗜𝗦 𝗧𝗛𝗘𝗠𝗘, but it's in 𝗔 𝗠𝗮𝗷𝗼𝗿. some more words to bypass shouldTrustCaps", "Tetris theme, but it's in A Major. Some more words to bypass shouldTrustCaps"]
     ];
-    for (const testCase of titleCases) {
+    for (const testCase of sentenceCases) {
         const [input, expected] = testCase;
         it(input, async () => {
             expect(await formatTitleInternal(input, false, TitleFormatting.SentenceCase, true)).toBe(expected);
@@ -254,7 +293,7 @@ describe("titleFormatter custom cases", () => {
         ["Bill Swearingen - HAKC THE POLICE - DEF CON 27 conference", "Bill Swearingen - HAKC THE POLICE - DEF CON 27 Conference", "Bill Swearingen - HAKC THE POLICE - DEF CON 27 conference"], // preserve delibrate uppercases
         ["NA/TURALS: FINAL/LAP ft. Cloud9 meL & Jazzyk1ns | VCT NA game changers", "NA/TURALS: FINAL/LAP ft. Cloud9 meL & Jazzyk1ns | VCT NA Game Changers", "NA/TURALS: FINAL/LAP ft. Cloud9 meL & Jazzyk1ns | VCT NA game changers"], // keep titles, prefixes, lowercase usernames
         ["[MV] SEVENTEEN(세븐틴), >Ailee(에일리) _ Q&A", "[MV] SEVENTEEN(세븐틴), Ailee(에일리) _ Q&A", "[MV] SEVENTEEN(세븐틴), Ailee(에일리) _ Q&A"], // keep all caps in title for SEVENTEEN and [MV]
-        ["AH-dventures in LA - >4K", "AH-dventures in LA - 4K", "AH-dventures in LA - 4K"], // capitalization for pun, 4K
+        ["AH-dventures in LA - >4K", "AH-Dventures in LA - 4K", "AH-dventures in LA - 4K"], // capitalization for pun, 4K
         ["Welcome to the cunderground - GTA V: cunning stunts", "Welcome to the Cunderground - GTA V: Cunning Stunts", "Welcome to the cunderground - GTA V: Cunning stunts"], // GTA V:
         ["Achievement City, plan G(mod) - Gmod: TTT | let's play", "Achievement City, Plan G(mod) - Gmod: TTT | Let's Play", "Achievement City, plan G(mod) - Gmod: TTT | Let's play"], // Proper place, G(mod)
         ["Mad vs T1 - game 1 | round 1 Lol MSI 2023", "Mad vs T1 - Game 1 | Round 1 Lol MSI 2023", "Mad vs T1 - Game 1 | Round 1 Lol MSI 2023"], // LoL, MSI and T1
@@ -263,7 +302,7 @@ describe("titleFormatter custom cases", () => {
         ["Snapshot >23w14a", "Snapshot 23w14a", "Snapshot 23w14a"], // 23W14A
         ["Is the F-15EX secretly the best fighter jet ever made?", "Is the F-15EX Secretly the Best Fighter Jet Ever Made?", "Is the F-15EX secretly the best fighter jet ever made?"], // F-15EX
         ["US F-15s nose dive against each other | DCS", "US F-15s Nose Dive Against Each Other | DCS", "US F-15s nose dive against each other | DCS"], // DCS, F-15s
-        ["F/A-18C Hornets execute no knock raid | DCS", "F/A-18C Hornets Execute No Knock Raid | DCS", "F/A-18C Hornets execute no knock raid | DCS"], // F/A-18C, DCS
+        ["F/A-18C Hornets execute no knock raid | DCS", "F/a-18C Hornets Execute No Knock Raid | DCS", "F/A-18C Hornets execute no knock raid | DCS"], // F/A-18C, DCS
         ["CS 1.6 - zombie plague / >zm_cubeworld_mini [küplere biniyoruz]", "CS 1.6 - Zombie Plague / zm_cubeworld_mini [Küplere Biniyoruz]", "CS 1.6 - Zombie plague / zm_cubeworld_mini [küplere biniyoruz]"], // preserve zm_cubeworld_mini
         [">f0rest vs. >x6tence @IEM IV european championship", "f0rest vs. x6tence @IEM IV European Championship", "f0rest vs. x6tence @IEM IV european championship"], // two lowercase names
         [">markeloff vs SK.swe (ESWC 2010 final)", "markeloff vs SK.swe (ESWC 2010 Final)", "markeloff vs SK.swe (ESWC 2010 final)"], // keep markeloff, keep SK.swe
@@ -271,14 +310,13 @@ describe("titleFormatter custom cases", () => {
         ["POV: Neo vs. mythiX @GAMEGUNE Frag eXecutors CS 1.6 demo", "POV: Neo vs. mythiX @GAMEGUNE Frag eXecutors CS 1.6 Demo", "POV: Neo vs. mythiX @GAMEGUNE Frag eXecutors CS 1.6 demo"], // mythiX, eXecutors
         ["POV: >cogu vs. Eurotrip >mibr CS 1.6 demo", "POV: cogu vs. Eurotrip mibr CS 1.6 Demo", "POV: cogu vs. Eurotrip mibr CS 1.6 demo"], // cogu, Eurotrip, mibr
         [">n0thing vs. nMo @CEVO-P season VIII >(de_dust2)","n0thing vs. nMo @CEVO-P Season VIII (de_dust2)","n0thing vs. nMo @CEVO-P season VIII (de_dust2)"], // n0thing, nMo, VIII, de_dust2
-        ["POV: >zet vs. a-Losers NiP CS 1.6 demo","POV: zet vs. a-Losers NiP CS 1.6 Demo","POV: zet vs. a-Losers NiP CS 1.6 demo"], // zet, a-Losers
+        ["POV: >zet vs. >a-Losers NiP CS 1.6 demo","POV: zet vs. a-Losers NiP CS 1.6 Demo","POV: zet vs. a-Losers NiP CS 1.6 demo"], // zet, a-Losers
         ["POV: >f0rest vs. Virtus.pro >fnatic CS 1.6 demo part1", "POV: f0rest vs. Virtus.pro fnatic CS 1.6 Demo Part1","POV: f0rest vs. Virtus.pro fnatic CS 1.6 demo part1"], // Virtus.pro, fnatic
         ["Announcements at >Google I/O 2023", "Announcements at Google I/O 2023", "Announcements at Google I/O 2023"], // Google sould be capitalized
         ["WWDC 2022 - iOS 16 announcement", "WWDC 2022 - iOS 16 Announcement", "WWDC 2022 - iOS 16 announcement"], // iOS should NOT be capitalized
         [`My thoughts on GM and Ford's move to abandon the CCS connector in favor of "NACS"`, `My Thoughts on GM and Ford's Move to Abandon the CCS Connector in Favor of "NACS"`, `My thoughts on GM and Ford's move to abandon the CCS connector in favor of "NACS"`],
         ["One thing: then another thing", "One Thing: Then Another Thing", "One thing: Then another thing"],
-        ["One thing: but-then another thing", "One Thing: But-then Another Thing", "One thing: But-then another thing"],
-        ["One thing: but-Then another thing", "One Thing: But-then Another Thing", "One thing: But-then another thing"],
+        ["One thing: but-then another thing", "One Thing: But-Then Another Thing", "One thing: But-then another thing"],
     ];
     for (const testCase of customTitles) {
         const [input, title, sentence] = testCase;
@@ -307,6 +345,26 @@ describe("cleanPunctuation", () => {
         const [input, expected] = testCase;
         it(input, () => {
             expect(cleanPunctuation(input)).toBe(expected);
+        });
+    }
+});
+
+describe("cleanFancyText", () => {
+    const titleCases: [string, string][] = [
+        ["𝐆𝐀𝐋𝐓 𝐒𝐔𝐁 𝐓𝐑𝐀𝐈𝐍𝐒 Railfan Mini-Meetup at Leaside", "GALT SUB TRAINS Railfan Mini-Meetup at Leaside"],
+        ["Every Glitch in Super Mario Odyssey ᵃˡᵐᵒˢᵗ", "Every Glitch in Super Mario Odyssey almost"],
+        ["A word with all the letters ᵃᵇᶜᵈᵉᶠᵍʰⁱʲᵏˡᵐⁿᵒᵖʳˢᵗᵘᵛʷˣʸᶻ", "A word with all the letters abcdefghijklmnoprstuvwxyz"],
+        ["A word with all the letters ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘꞯʀꜱᴛᴜᴠᴡʏᴢ", "A word with all the letters ABCDEFGHIJKLMNOPQRSTUVWYZ"],
+        ["A word with all the letters 𝐚𝐛𝐜𝐝𝐞𝐟𝐠𝐡𝐢𝐣𝐤𝐥𝐦𝐧𝐨𝐩𝐪𝐫𝐬𝐭𝐮𝐯𝐰𝐱𝐲𝐳", "A word with all the letters abcdefghijklmnopqrstuvwxyz"],
+        ["A word with all the letters ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙⓚⓛⓜⓝⓞⓟⓠⓡⓢⓣⓤⓥⓦⓧⓨⓩ", "A word with all the letters abcdefghijklmnopqrstuvwxyz"],
+        ["𝗧𝗘𝗧𝗥𝗜𝗦 𝗧𝗛𝗘𝗠𝗘, but it's in 𝗔 𝗠𝗮𝗷𝗼𝗿.", "TETRIS THEME, but it's in A Major."],
+        ["𝘁𝗮𝗹𝗸𝗶𝗻𝗴 𝘁𝗮𝗹𝗸𝗶𝗻𝗴 𝘁𝗮𝗹𝗸𝗶𝗻𝗴", "talking talking talking"],
+        
+    ];
+    for (const testCase of titleCases) {
+        const [input, expected] = testCase;
+        it(input, async () => {
+            expect(await cleanFancyText(input)).toBe(expected);
         });
     }
 });

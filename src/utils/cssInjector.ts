@@ -1,8 +1,8 @@
 import { isFirefoxOrSafari, waitFor } from "../../maze-utils/src";
 import Config from "../config/config";
-import { brandingBoxSelector, watchPageThumbnailSelector } from "../videoBranding/videoBranding";
+import { watchPageThumbnailSelector } from "../videoBranding/videoBranding";
 import { logError } from "./logger";
-import { getThumbnailElements } from "../../maze-utils/src/thumbnail-selectors";
+import { brandingBoxSelector, getThumbnailElements } from "../../maze-utils/src/thumbnail-selectors";
 import { onMobile } from "../../maze-utils/src/pageInfo";
 
 const cssFiles = [
@@ -14,11 +14,16 @@ export function addCssToPage() {
     const head = document.getElementsByTagName("head")[0] || document.documentElement;
 
     // Add css related to hiding branding boxes by default
-    const style = document.createElement("style");
-    style.className = "cb-css";
-    style.innerHTML = buildHideThumbnailCss() + buildHideTitleCss();
+    const titleStyle = document.createElement("style");
+    titleStyle.className = "cb-css";
+    titleStyle.innerHTML = buildHideTitleCss();
 
-    head.appendChild(style);
+    const thumbStyle = document.createElement("style");
+    thumbStyle.className = "cb-css";
+    thumbStyle.innerHTML = buildHideThumbnailCss();
+
+    head.appendChild(titleStyle);
+    head.appendChild(thumbStyle);
 
     const onLoad = async () => {
         await waitFor(() => Config.isReady());
@@ -49,7 +54,17 @@ export function addCssToPage() {
         window.addEventListener("DOMContentLoaded", onLoad);
     }
 
-    waitFor(() => Config.isReady()).then(() => addMaxTitleLinesCssToPage()).catch(logError);
+    waitFor(() => Config.isReady()).then(() => {
+        addMaxTitleLinesCssToPage();
+        
+        if (!Config.config!.extensionEnabled || !Config.config!.replaceTitles) {
+            titleStyle.remove();
+        }
+
+        if (!Config.config!.extensionEnabled || !Config.config!.replaceThumbnails) {
+            thumbStyle.remove();
+        }
+    }).catch(logError);
 }
 
 export function addMaxTitleLinesCssToPage() {
@@ -71,7 +86,8 @@ function buildHideThumbnailCss(): string {
     const result: string[] = [
         ".ytp-ce-covering-image:not(.cb-visible)", // Endcards
         "div.ytp-autonav-endscreen-upnext-thumbnail:not(.cb-visible)", // Autoplay
-        "div.ytp-videowall-still-image:not(.cb-visible)" // End recommendations
+        "div.ytp-videowall-still-image:not(.cb-visible)", // End recommendations
+        "div.ytp-modern-videowall-still-image:not(.cb-visible)" // End recommendations
     ];
 
     const boxesToHide = brandingBoxSelector.split(", ").concat([
@@ -81,7 +97,12 @@ function buildHideThumbnailCss(): string {
         const thumbnailTypes = getThumbnailElements();
 
         for (const thumbnailType of thumbnailTypes) {
-            result.push(`${start} ${thumbnailType} img:not(.cb-visible, ytd-moving-thumbnail-renderer img, .cbCustomThumbnailCanvas)`);
+            let additionalItem = "";
+            if (thumbnailType === "yt-thumbnail-view-model") {
+                additionalItem = " *:not(.ytThumbnailViewModelBlurredImage)";
+            }
+
+            result.push(`${start} ${thumbnailType}${additionalItem} img:not(.cb-visible, ytd-moving-thumbnail-renderer img, .cbCustomThumbnailCanvas, .yt-spec-avatar-shape__image, .cbShowOriginalImage)`);
         }
     }
 
@@ -104,10 +125,6 @@ function buildHideTitleCss(): string {
         }
     }
 
-    if (onMobile()) {
-        result.push(".compact-media-item-headline .yt-core-attributed-string:not(.cbCustomTitle)");
-    }
-
     return `${result.join(", ")} { display: none !important; }\n`;
 }
 
@@ -120,6 +137,7 @@ function buildMaxLinesTitleCss(): string {
         if (!onMobile()) {
             // .ta-title-container for compatibility with Tube Archivist
             result.push(`${start} #video-title:not(.ta-title-container)`);
+            result.push(`${start} .yt-lockup-metadata-view-model__title > .yt-core-attributed-string:not(.ta-title-container)`);
         }
     }
 

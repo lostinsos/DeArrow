@@ -1,46 +1,62 @@
 import { getYouTubeTitleNodeSelector } from "../../maze-utils/src/elements";
-import { getVideoID, VideoID } from "../../maze-utils/src/video";
-import { getElement, isVisible, waitForElement } from "../../maze-utils/src/dom";
+import { extractVideoID, getVideoID, isOnChannelPage, VideoID } from "../../maze-utils/src/video";
+import { getElement, isVisibleOrParent, waitForElement } from "../../maze-utils/src/dom";
 import { ThumbnailResult } from "../thumbnails/thumbnailData";
-import { replaceThumbnail } from "../thumbnails/thumbnailRenderer";
+import { getThumbnailImageSelector, replaceThumbnail } from "../thumbnails/thumbnailRenderer";
 import { TitleResult } from "../titles/titleData";
 import { findOrCreateShowOriginalButton, getOrCreateTitleElement, getOriginalTitleElement, hideAndUpdateShowOriginalButton as hideAndUpdateShowOriginalButton, replaceTitle } from "../titles/titleRenderer";
 import { setThumbnailListener } from "../../maze-utils/src/thumbnailManagement";
-import Config, { ThumbnailCacheOption } from "../config/config";
+import Config, { ThumbnailCacheOption, TitleFormatting } from "../config/config";
 import { logError } from "../utils/logger";
-import { getVideoTitleIncludingUnsubmitted } from "../dataFetching";
+import { getVideoCasualInfo, getVideoTitleIncludingUnsubmitted } from "../dataFetching";
 import { handleOnboarding } from "./onboarding";
 import { cleanEmojis, cleanResultingTitle } from "../titles/titleFormatter";
-import { shouldDefaultToCustom, shouldDefaultToCustomFastCheck, shouldUseCrowdsourcedTitles } from "../config/channelOverrides";
-import { onMobile } from "../../maze-utils/src/pageInfo";
+import { getTitleFormatting, shouldDefaultToCustom, shouldDefaultToCustomFastCheck, shouldUseCrowdsourcedTitles } from "../config/channelOverrides";
+import { isOnV3Extension, onMobile } from "../../maze-utils/src/pageInfo";
 import { addMaxTitleLinesCssToPage } from "../utils/cssInjector";
+import { casualVoteButton, submitButton } from "../video";
+import { waitFor } from "../../maze-utils/src";
+import { brandingBoxSelector } from "../../maze-utils/src/thumbnail-selectors";
 
 export type BrandingUUID = string & { readonly __brandingUUID: unique symbol };
 
 export interface BrandingResult {
     titles: TitleResult[];
     thumbnails: ThumbnailResult[];
+    casualVotes: CasualVoteInfo[];
     randomTime: number | null;
     videoDuration: number | null;
+}
+
+export interface CasualVoteInfo {
+    id: string;
+    count: number;
+    title?: string;
 }
 
 export enum BrandingLocation {
     Related,
     Watch,
+    ChannelTrailer,
     Endcards,
     Autoplay,
     EndRecommendations,
+    EndAutonav,
     EmbedSuggestions,
-    UpNextPreview
+    UpNextPreview,
+    Notification,
+    NotificationTitle
 }
 
 export type ShowCustomBrandingInfo = {
     knownValue: boolean;
     originalValue: boolean | null;
+    showCasual: boolean | null;
 } | {
     knownValue: null;
     actualValue: Promise<boolean>;
     originalValue: boolean | null;
+    showCasual: boolean | null;
 };
 
 export interface VideoBrandingInstance {
@@ -48,34 +64,39 @@ export interface VideoBrandingInstance {
     updateBrandingCallbacks: Array<() => Promise<void>>;
 }
 
-export const brandingBoxSelector = !onMobile() 
-    ? "ytd-rich-grid-media, ytd-video-renderer, ytd-movie-renderer, ytd-compact-video-renderer, ytd-compact-radio-renderer, ytd-compact-movie-renderer, ytd-playlist-video-renderer, ytd-playlist-panel-video-renderer, ytd-grid-video-renderer, ytd-grid-movie-renderer, ytd-rich-grid-slim-media, ytd-radio-renderer, ytd-reel-item-renderer, ytd-compact-playlist-renderer, ytd-playlist-renderer, ytd-grid-playlist-renderer, ytd-grid-show-renderer, ytd-structured-description-video-lockup-renderer, ytd-hero-playlist-thumbnail-renderer"
-    : "ytm-video-with-context-renderer, ytm-compact-radio-renderer, ytm-reel-item-renderer, ytm-channel-featured-video-renderer, ytm-compact-video-renderer, ytm-playlist-video-renderer, .playlist-immersive-header-content, ytm-compact-playlist-renderer, ytm-video-card-renderer, ytm-vertical-list-renderer, ytm-playlist-panel-video-renderer";
-
 export const watchPageThumbnailSelector = ".ytp-cued-thumbnail-overlay";
 
 const twoRingLogo = chrome.runtime.getURL("icons/logo-2r.svg");
 const threeRingLogo = chrome.runtime.getURL("icons/logo.svg");
+const casualLogo = chrome.runtime.getURL("icons/logo-casual.svg");
 
 const videoBrandingInstances: Record<VideoID, VideoBrandingInstance> = {}
 
 export async function replaceCurrentVideoBranding(): Promise<[boolean, boolean]> {
     const onClipPage = document.URL.includes("/clip/");
     const onWatchPage = document.URL.includes("/watch") || onClipPage;
+    const onChannelPage = isOnChannelPage();
     const onEmbedPage = document.URL.includes("/embed/");
-    const possibleSelectors = getPossibleSelectors(onWatchPage, onEmbedPage);
+    const possibleSelectors = getPossibleSelectors(onWatchPage, onEmbedPage, onChannelPage);
 
     // Find first invisible one, or wait for the first one to be visible
-    const mainTitle = possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility, true) as HTMLElement).filter((element) => isVisible(element, true))[0] || 
-        await waitForElement(possibleSelectors[0].selector, !onClipPage, true) as HTMLElement;
-    const titles = (possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility && !onClipPage, true)).filter((e) => !!e)) as HTMLElement[];
+    const mainTitle = await (async () => {
+        if (!onChannelPage) {
+            const firstVisible = possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility, true, true) as HTMLElement)
+                .filter((element) => isVisibleOrParent(element, true, true))[0];
+            if (firstVisible) return firstVisible;
+        }
+
+        return await waitForElement(possibleSelectors[0].selector, !onClipPage, true, true) as HTMLElement;
+    })();
+    const titles = (possibleSelectors.map((selector) => getElement(selector.selector, selector.checkVisibility && !onClipPage, true, true)).filter((e) => !!e)) as HTMLElement[];
     const promises: [Promise<boolean>, Promise<boolean>] = [Promise.resolve(false), Promise.resolve(false)]
     const videoID = getVideoID();
 
-    if (videoID !== null && (isVisible(mainTitle, true) || onClipPage)) {
+    if (videoID !== null && (isVisibleOrParent(mainTitle, true, true) || onClipPage)) {
         const videoBrandingInstance = getAndUpdateVideoBrandingInstances(videoID,
             async () => { await replaceCurrentVideoBranding(); });
-        const brandingLocation = BrandingLocation.Watch;
+        const brandingLocation = onWatchPage ? BrandingLocation.Watch : BrandingLocation.ChannelTrailer;
         const showCustomBranding = videoBrandingInstance.showCustomBranding;
 
         // Replace each title and return true only if all true
@@ -83,19 +104,20 @@ export async function replaceCurrentVideoBranding(): Promise<[boolean, boolean]>
             replaceTitle(title, videoID, showCustomBranding, brandingLocation)))
         .then((results) => results.every((result) => result));
 
-        const thumbnailElement = document.querySelector(watchPageThumbnailSelector) as HTMLElement;
-        if (thumbnailElement) {
-            const childElement = thumbnailElement.querySelector("div");
-            if (Config.config!.thumbnailCacheUse > ThumbnailCacheOption.OnAllPagesExceptWatch) {
-                if (childElement) childElement.style.removeProperty("visibility");
-                promises[1] = replaceThumbnail(thumbnailElement, videoID, brandingLocation, showCustomBranding);
-            } else {
-                if (childElement) childElement.style.setProperty("visibility", "visible", "important");
+        waitFor(() => document.querySelector(watchPageThumbnailSelector) as HTMLElement).catch(() => null).then((thumbnailElement) => {
+            if (thumbnailElement) {
+                const childElement = thumbnailElement.querySelector("div");
+                if (Config.config!.thumbnailCacheUse > ThumbnailCacheOption.OnAllPagesExceptWatch) {
+                    if (childElement) childElement.style.removeProperty("visibility");
+                    promises[1] = replaceThumbnail(thumbnailElement, videoID, brandingLocation, showCustomBranding);
+                } else {
+                    if (childElement) childElement.style.setProperty("visibility", "visible", "important");
+                }
             }
-        }
+        }).catch(logError);
 
         // Only the first title needs a button, it will affect all titles
-        if (onWatchPage) {
+        if (onWatchPage || onChannelPage) {
             void handleShowOriginalButton(titles[0], videoID, brandingLocation, showCustomBranding, promises, true);
         }
     }
@@ -103,23 +125,32 @@ export async function replaceCurrentVideoBranding(): Promise<[boolean, boolean]>
     return Promise.all(promises);
 }
 
-function getPossibleSelectors(onWatchPage: boolean, onEmbedPage: boolean) {
+function getPossibleSelectors(onWatchPage: boolean, onEmbedPage: boolean, onChannelPage: boolean) {
+    const embedSelector = {
+        selector: ".ytp-title-text, .ytPlayerOverlayVideoDetailsRendererTitle",
+        checkVisibility: false
+    };
+    const desktopWatchSelectors = [
+        {
+            selector: getYouTubeTitleNodeSelector(),
+            checkVisibility: true
+        },
+        embedSelector,
+        {
+            selector: "ytd-video-description-header-renderer #shorts-title",
+            checkVisibility: false
+        }
+    ];
+    const desktopMiniplayerSelector = [
+        {
+            selector: ".miniplayer #info-bar",
+            checkVisibility: false
+        }
+    ];
+
     if (onWatchPage) {
         if (!onMobile()) {
-            return [
-                {
-                    selector: getYouTubeTitleNodeSelector(),
-                    checkVisibility: true
-                },
-                {
-                    selector: ".ytp-title-text",
-                    checkVisibility: false
-                },
-                {
-                    selector: "ytd-video-description-header-renderer #shorts-title",
-                    checkVisibility: false
-                }
-            ];
+            return desktopWatchSelectors;
         } else {
             return [
                 {
@@ -132,20 +163,22 @@ function getPossibleSelectors(onWatchPage: boolean, onEmbedPage: boolean) {
                 }
             ];
         }
+    } else if (onChannelPage && !onMobile()) {
+        // For channel trailers
+        return [
+            {
+                selector: "ytd-channel-video-player-renderer #content #title",
+                checkVisibility: true
+            },
+            {
+                selector: "ytd-channel-video-player-renderer .ytp-title-text",
+                checkVisibility: false
+            }
+        ].concat(desktopMiniplayerSelector);
     } else if (onEmbedPage) {
-        return [
-            {
-                selector: ".ytp-title-text",
-                checkVisibility: false
-            }
-        ];
+        return [embedSelector];
     } else {
-        return [
-            {
-                selector: ".miniplayer #info-bar",
-                checkVisibility: false
-            }
-        ];
+        return desktopMiniplayerSelector;
     }
 }
 
@@ -154,7 +187,9 @@ export async function replaceVideoCardsBranding(elements: HTMLElement[]): Promis
 }
 
 export async function replaceVideoCardBranding(element: HTMLElement, brandingLocation: BrandingLocation,
-        verifyVideoID?: VideoID, tries = 0): Promise<[boolean, boolean]> {
+        extraParams: { verifyVideoID?: VideoID; tries?: number; dontReplaceTitle?: boolean } = {}): Promise<[boolean, boolean]> {
+    
+    extraParams.tries ??= 0;
     const link = getLinkElement(element, brandingLocation);
 
     if (link) {
@@ -162,24 +197,25 @@ export async function replaceVideoCardBranding(element: HTMLElement, brandingLoc
         const isPlaylistOrClipTitleStatus = isPlaylistOrClipTitle(element, link);
         const isMovie = element.nodeName.includes("MOVIE");
 
-        if (verifyVideoID && videoID !== verifyVideoID) {
+        if (extraParams.verifyVideoID && videoID !== extraParams.verifyVideoID) {
             // Don't need this branding update anymore, it was trying to update for a different video
             return [false, false];
         }
 
         const videoBrandingInstance = getAndUpdateVideoBrandingInstances(videoID,
-            async () => { await replaceVideoCardBranding(element, brandingLocation, videoID); });
+            async () => { await replaceVideoCardBranding(element, brandingLocation, { ...extraParams, verifyVideoID: videoID, tries: 0 }); });
         const showCustomBranding = videoBrandingInstance.showCustomBranding;
 
         const videoPromise = replaceThumbnail(element, videoID, brandingLocation, isMovie ? {
             knownValue: false,
-            originalValue: false
+            originalValue: false,
+            showCasual: Config.config!.casualMode
         } : showCustomBranding);
-        const titlePromise = !isPlaylistOrClipTitleStatus 
+        const titlePromise = !isPlaylistOrClipTitleStatus && !extraParams.dontReplaceTitle
             ? replaceTitle(element, videoID, showCustomBranding, brandingLocation) 
             : Promise.resolve(false);
 
-        if (isPlaylistOrClipTitleStatus) {
+        if (isPlaylistOrClipTitleStatus || extraParams.dontReplaceTitle) {
             // Still create title element to make sure show original button will be in the right place
             const originalTitleElement = getOriginalTitleElement(element, brandingLocation);
             const titleElement = getOrCreateTitleElement(element, brandingLocation, originalTitleElement);
@@ -195,9 +231,10 @@ export async function replaceVideoCardBranding(element: HTMLElement, brandingLoc
 
         const result = await Promise.all(promises);
 
-        if (videoID !== await extractVideoID(link) && await extractVideoID(link) && tries < 2) {
+        if (videoID !== await extractVideoID(link) && await extractVideoID(link) && extraParams.tries < 2) {
             // Video ID changed, so try again
-            return replaceVideoCardBranding(element, brandingLocation, verifyVideoID, tries++);
+            extraParams.tries++;
+            return replaceVideoCardBranding(element, brandingLocation, extraParams);
         }
 
         if (document.hasFocus()) {
@@ -207,6 +244,13 @@ export async function replaceVideoCardBranding(element: HTMLElement, brandingLoc
         }
 
         return result;
+    } else {
+        // Make sure thumbnail doesn't get hidden if link isn't found
+
+        const originalThumbnail = element.querySelector(getThumbnailImageSelector(brandingLocation));
+        if (originalThumbnail) {
+            originalThumbnail.classList.add("cb-visible");
+        }
     }
 
     return [false, false];
@@ -216,8 +260,15 @@ export function getLinkElement(element: HTMLElement, brandingLocation: BrandingL
     switch (brandingLocation) {
         case BrandingLocation.Related:
             if (!onMobile()) {
-                const link = element.querySelector("a#thumbnail") as HTMLAnchorElement;
-                if (link) {
+                const link = element.querySelector("a#thumbnail, a.reel-item-endpoint, a.yt-lockup-metadata-view-model__title, a.yt-lockup-metadata-view-model__title-link, a.yt-lockup-view-model__content-image, a.yt-lockup-metadata-view-model-wiz__title") as HTMLAnchorElement;
+
+                if (isOnV3Extension()) {
+                    if (element.tagName === "A") {
+                        return element as HTMLAnchorElement;
+                    } else {
+                        return element.querySelector(`a[href*="watch?v="]`) as HTMLAnchorElement;
+                    }
+                } else if (link) {
                     return link;
                 } else if (element.nodeName === "YTD-HERO-PLAYLIST-THUMBNAIL-RENDERER") {
                     return element.closest("a") as HTMLAnchorElement;
@@ -226,7 +277,7 @@ export function getLinkElement(element: HTMLElement, brandingLocation: BrandingL
                 }
             } else {
                 // Big thumbnails, compact thumbnails, shorts, channel feature, playlist header
-                return element.querySelector("a.media-item-thumbnail-container, a.compact-media-item-image, a.reel-item-endpoint, :scope > a, .amsterdam-playlist-thumbnail-wrapper > a") as HTMLAnchorElement;
+                return element.querySelector("a.media-item-thumbnail-container, a.compact-media-item-image, a.reel-item-endpoint, :scope > a, .amsterdam-playlist-thumbnail-wrapper > a, a.YtmCompactMediaItemMetadataContent") as HTMLAnchorElement;
             }
         case BrandingLocation.Endcards:
             return element.querySelector("a.ytp-ce-covering-overlay") as HTMLAnchorElement;
@@ -235,41 +286,14 @@ export function getLinkElement(element: HTMLElement, brandingLocation: BrandingL
         case BrandingLocation.EndRecommendations:
         case BrandingLocation.EmbedSuggestions:
         case BrandingLocation.UpNextPreview:
+        case BrandingLocation.EndAutonav:
             return element as HTMLAnchorElement;
+        case BrandingLocation.Notification:
+        case BrandingLocation.NotificationTitle:
+            return element.querySelector("a");
         default:
             throw new Error("Invalid branding location");
     }
-}
-
-async function extractVideoID(link: HTMLAnchorElement) {
-    const videoIDRegex = link.href?.match?.(/(?:\?|&)v=(\S{11})|\/shorts\/(\S{11})/);
-    let videoID = (videoIDRegex?.[1] || videoIDRegex?.[2]) as VideoID;
-
-    if (!videoID) {
-        const imgBackground = link.querySelector(".ytp-tooltip-bg") as HTMLElement;
-        if (imgBackground) {
-            const href = imgBackground.style.backgroundImage?.match(/url\("(.+)"\)/)?.[1];
-            if (href) {
-                videoID = href.match(/\/vi\/(\S{11})/)?.[1] as VideoID;
-            }
-        } else {
-            const image = link.querySelector("yt-image img, img.video-thumbnail-img, yt-img-shadow img") as HTMLImageElement;
-            if (image) {
-                let href = image.getAttribute("src");
-                if (!href) {
-                    // wait source to be setup
-                    await waitForImageSrc(image);
-                    href = image.getAttribute("src");
-                }
-    
-                if (href) {
-                    videoID = href.match(/\/vi\/(\S{11})/)?.[1] as VideoID;
-                }
-            }
-        }
-    }
-
-    return videoID;
 }
 
 export async function extractVideoIDFromElement(element: HTMLElement, brandingLocation: BrandingLocation): Promise<VideoID | null> {
@@ -283,7 +307,8 @@ export async function extractVideoIDFromElement(element: HTMLElement, brandingLo
 
 function isPlaylistOrClipTitle(element: HTMLElement, link: HTMLAnchorElement) {
     return (link.href?.match(/list=/)?.[0] !== undefined 
-            && link.href?.match(/index=/)?.[0] === undefined)
+            && link.href?.match(/index=/)?.[0] === undefined
+            && link.href?.match(/start_radio=/)?.[0] === undefined)
         || link.href?.match(/\/clip\//)?.[0] !== undefined;
 }
 
@@ -291,16 +316,11 @@ export async function handleShowOriginalButton(element: HTMLElement, videoID: Vi
         brandingLocation: BrandingLocation, showCustomBranding: ShowCustomBrandingInfo,
         promises: [Promise<boolean>, Promise<boolean>],
         dontHide = false): Promise<void> {
-    await hideAndUpdateShowOriginalButton(element, brandingLocation, showCustomBranding, dontHide);
+    await hideAndUpdateShowOriginalButton(videoID, element, brandingLocation, showCustomBranding, dontHide);
 
     const result = await Promise.race(promises);
     if (result || (await Promise.all(promises)).some((r) => r)) {
-        const title = await getVideoTitleIncludingUnsubmitted(videoID, brandingLocation);
-        const originalTitle = getOriginalTitleElement(element, brandingLocation)?.textContent;
-        const customTitle = title && !title.original 
-            && (!originalTitle || (cleanResultingTitle(cleanEmojis(title.title))).toLowerCase() !== (cleanResultingTitle(cleanEmojis(originalTitle))).toLowerCase())
-            && await shouldUseCrowdsourcedTitles(videoID);
-
+        const customTitle = await hasCustomTitle(videoID, element, brandingLocation);
         if (!customTitle && !Config.config!.showIconForFormattedTitles && !await promises[1]) {
             return;
         }
@@ -308,18 +328,25 @@ export async function handleShowOriginalButton(element: HTMLElement, videoID: Vi
         const button = await findOrCreateShowOriginalButton(element, brandingLocation, videoID);
         const image = button.querySelector("img") as HTMLImageElement;
         if (image) {
-            if (!customTitle) {
+            const shouldShowCasualTitle = await shouldShowCasual(videoID, element, showCustomBranding, brandingLocation);
+            if (shouldShowCasualTitle && (customTitle || !Config.config!.onlyShowCasualIconForCustom)) {
+                image.src = casualLogo;
+                image.classList.add("cbCasualTitle");
+                image.classList.remove("cbAutoFormat");
+            } else if (!customTitle || (shouldShowCasualTitle && Config.config!.onlyShowCasualIconForCustom)) {
                 image.src = twoRingLogo;
                 image.classList.add("cbAutoFormat");
+                image.classList.remove("cbCasualTitle");
             } else {
                 image.src = threeRingLogo;
                 image.classList.remove("cbAutoFormat");
+                image.classList.remove("cbCasualTitle");
             }
         }
     } else if (dontHide) {
         // Hide it now
 
-        await hideAndUpdateShowOriginalButton(element, brandingLocation, showCustomBranding, false);
+        await hideAndUpdateShowOriginalButton(videoID, element, brandingLocation, showCustomBranding, false);
     }
 }
 
@@ -329,7 +356,8 @@ function getAndUpdateVideoBrandingInstances(videoID: VideoID, updateBranding: ()
             showCustomBranding: {
                 knownValue: shouldDefaultToCustomFastCheck(videoID),
                 actualValue: shouldDefaultToCustom(videoID),
-                originalValue: shouldDefaultToCustomFastCheck(videoID)
+                originalValue: shouldDefaultToCustomFastCheck(videoID),
+                showCasual: Config.config!.casualMode
             },
             updateBrandingCallbacks: [updateBranding]
         }
@@ -340,17 +368,64 @@ function getAndUpdateVideoBrandingInstances(videoID: VideoID, updateBranding: ()
     return videoBrandingInstances[videoID];
 }
 
-export async function toggleShowCustom(videoID: VideoID): Promise<void> {
+export async function setShowCustomBasedOnDefault(videoID: VideoID, originalTitleElement: HTMLElement, brandingLocation: BrandingLocation, value: boolean): Promise<void> {
     if (videoBrandingInstances[videoID]) {
-        return await setShowCustom(videoID, !await getActualShowCustomBranding(videoBrandingInstances[videoID].showCustomBranding));
+        const showThreeStages = await showThreeShowOriginalStages(videoID, originalTitleElement, brandingLocation);
+        const alwaysShowCustom = showThreeStages && Config.config!.showOriginalOnHover && Config.config!.showCustomOnHoverIfCasual;
+
+        // If value true, use default, otherwise use opposite of default
+        return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation,
+            alwaysShowCustom || (!!videoBrandingInstances[videoID].showCustomBranding.originalValue === value),
+                showThreeStages ? value : undefined);
     }
 }
 
-export async function setShowCustom(videoID: VideoID, value: boolean): Promise<void> {
+export async function toggleShowCustom(videoID: VideoID, originalTitleElement: HTMLElement, brandingLocation: BrandingLocation): Promise<void> {
     if (videoBrandingInstances[videoID]) {
+        const shouldShowCustom = await getActualShowCustomBranding(videoBrandingInstances[videoID].showCustomBranding);
+        if (await showThreeShowOriginalStages(videoID, originalTitleElement, brandingLocation)) {
+            // casual -> custom -> original
+            if (videoBrandingInstances[videoID].showCustomBranding.showCasual) {
+                // Go to custom
+                return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation, true, false);
+            } else {
+                if (shouldShowCustom) {
+                    if (Config.config!.formatCasualTitles && await getTitleFormatting(videoID) !== TitleFormatting.Disable) {
+                        // Go to original
+                        return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation, false, false);
+                    } else {
+                        // Go back to casual
+                        return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation, true, true);
+                    }
+                } else {
+                    if (!Config.config!.showOriginalOnHover) {
+                        // Go to casual
+                        return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation, true, true);
+                    } else {
+                        // Go to custom when clicking after hovering to show original
+                        return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation, true, false);
+                    }
+                }
+            }
+        } else {
+            return await internalSetShowCustom(videoID, originalTitleElement, brandingLocation, !shouldShowCustom);
+        }
+    }
+}
+
+async function internalSetShowCustom(videoID: VideoID, originalTitleElement: HTMLElement, brandingLocation: BrandingLocation, value: boolean, showCasual?: boolean): Promise<void> {
+    if (videoBrandingInstances[videoID]) {
+        if (showCasual == undefined) {
+            // When defaulting to original titles, only show casual mode icon when there is a custom title
+            // Also show casual mode icon when defaulting to original and showing original
+            const customTitle = await hasCustomTitleWithOriginalTitle(videoID, originalTitleElement, brandingLocation);
+            showCasual = await shouldDefaultToCustom(videoID) || !customTitle || (!(await shouldDefaultToCustom(videoID)) && !value);
+        }
+
         videoBrandingInstances[videoID].showCustomBranding = {
             knownValue: value,
-            originalValue: shouldDefaultToCustomFastCheck(videoID)
+            originalValue: shouldDefaultToCustomFastCheck(videoID),
+            showCasual: showCasual
         };
 
         await updateBrandingForVideo(videoID);
@@ -368,7 +443,8 @@ async function updateCurrentlyDefaultShowCustom(videoID: VideoID): Promise<void>
         videoBrandingInstances[videoID].showCustomBranding = {
             knownValue: shouldDefaultToCustomFastCheck(videoID),
             actualValue: shouldDefaultToCustom(videoID),
-            originalValue: shouldDefaultToCustomFastCheck(videoID)
+            originalValue: shouldDefaultToCustomFastCheck(videoID),
+            showCasual: Config.config!.casualMode
         };
     }
 
@@ -382,6 +458,18 @@ export async function updateBrandingForVideo(videoID: VideoID): Promise<void> {
         videoBrandingInstances[videoID].updateBrandingCallbacks = [];
 
         await Promise.all(updateBrandingCallbacks.map((updateBranding) => updateBranding()));
+    }
+}
+
+export function updateBrandingForAllVideos(): void {
+    for (const videoID in videoBrandingInstances) {
+        const updateBrandingCallbacks = videoBrandingInstances[videoID].updateBrandingCallbacks;
+        // They will be added back to the array
+        videoBrandingInstances[videoID].updateBrandingCallbacks = [];
+
+        for (const updateBranding of updateBrandingCallbacks) {
+            updateBranding().catch(logError);
+        }
     }
 }
 
@@ -416,6 +504,7 @@ export function setupOptionChangeListener(): void {
 
         const settingsToReload = [
             "extensionEnabled",
+            "casualMode",
             "replaceTitles",
             "replaceThumbnails",
             "useCrowdsourcedTitles",
@@ -430,7 +519,10 @@ export function setupOptionChangeListener(): void {
             "showIconForFormattedTitles",
             "ignoreAbThumbnails",
             "showOriginalOnHover",
-            "showLiveCover"
+            "showLiveCover",
+            "formatCustomTitles",
+            "formatOriginalTitles",
+            "formatCasualTitles"
         ];
 
         if (settingsToReload.some((name) => (changes[name] && changes[name].newValue !== changes[name].oldValue))) {
@@ -443,6 +535,13 @@ export function setupOptionChangeListener(): void {
                     updateBranding().catch(logError);
                 }
             }
+
+            if (changes["extensionEnabled"]) {
+                submitButton.updateIcon();
+                casualVoteButton.updateIcon();
+            } else if (changes["casualMode"]) {
+                casualVoteButton.updateIcon();
+            }
         }
 
         if (changes.titleMaxLines 
@@ -452,39 +551,57 @@ export function setupOptionChangeListener(): void {
     });
 }
 
-const imagesWaitingFor = new Map<HTMLImageElement, Promise<void>>();
-function waitForImageSrc(image: HTMLImageElement): Promise<void> {
-    const existingPromise = imagesWaitingFor.get(image);
-    if (!existingPromise) {
-        const result = new Promise<void>((resolve) => {
-            const observer = new MutationObserver((mutations) => {
-                if (!chrome.runtime?.id) return;
+async function hasCustomTitleWithOriginalTitle(videoID: VideoID, originalTitleElement: HTMLElement, brandingLocation: BrandingLocation): Promise<boolean> {
+    const title = await getVideoTitleIncludingUnsubmitted(videoID, brandingLocation);
+    const originalTitle = originalTitleElement?.textContent;
+    const customTitle = title && !title.original 
+        && (!originalTitle || (cleanResultingTitle(cleanEmojis(title.title))).toLowerCase() !== (cleanResultingTitle(cleanEmojis(originalTitle))).toLowerCase())
+        && await shouldUseCrowdsourcedTitles(videoID);
 
-                for (const mutation of mutations) {
-                    if (mutation.attributeName === "src"
-                            && image.src !== "") {
-                        observer.disconnect();
-                        resolve();
+    return !!customTitle;
+}
 
-                        imagesWaitingFor.delete(image);
-                        break;
-                    }
-                }
-            });
-
-            observer.observe(image, { attributes: true });
-        });
-
-        imagesWaitingFor.set(image, result);
-
-        return result;
-    }
-
-    return existingPromise;
+export async function hasCustomTitle(videoID: VideoID, element: HTMLElement, brandingLocation: BrandingLocation): Promise<boolean> {
+    return await hasCustomTitleWithOriginalTitle(videoID, getOriginalTitleElement(element, brandingLocation), brandingLocation);
 }
 
 export function getActualShowCustomBranding(showCustomBranding: ShowCustomBrandingInfo): Promise<boolean> {
     return showCustomBranding.knownValue === null 
         ? showCustomBranding.actualValue
         : Promise.resolve(showCustomBranding.knownValue);
+}
+
+export async function shouldShowCasual(videoID: VideoID, element: HTMLElement, showCustomBranding: ShowCustomBrandingInfo, brandingLocation: BrandingLocation): Promise<boolean> {
+    return !!showCustomBranding.showCasual && await shouldShowCasualOnVideo(videoID, element, brandingLocation);
+}
+
+export function shouldShowCasualOnVideo(videoID: VideoID, element: HTMLElement, brandingLocation: BrandingLocation): Promise<boolean> {
+    return shouldShowCasualOnVideoWithOriginalTitleElement(videoID, getOriginalTitleElement(element, brandingLocation), brandingLocation);
+}
+
+export async function shouldShowCasualOnVideoWithOriginalTitleElement(videoID: VideoID, originalTitleElement: HTMLElement, brandingLocation: BrandingLocation): Promise<boolean> {
+    if (!Config.config!.casualMode) return false;
+
+    const unsubmittedInfo = Config.local!.unsubmitted[videoID];
+    if (unsubmittedInfo && unsubmittedInfo.casual !== undefined) {
+        return unsubmittedInfo.casual;
+    }
+
+    const currentPageTitle = originalTitleElement.textContent;
+    const casualInfo = (await getVideoCasualInfo(videoID, brandingLocation))
+        .filter((v) => !v.title || v.title.toLowerCase() === currentPageTitle?.toLowerCase().trim());
+
+    for (const category of casualInfo) {
+        const configAmount = Config.config!.casualModeSettings[category.id];
+        if (configAmount && category.count >= configAmount) {
+            return true;
+        }
+    }
+    return false;
+}
+
+export async function showThreeShowOriginalStages(videoID: VideoID, originalTitleElement: HTMLElement, brandingLocation: BrandingLocation): Promise<boolean> {
+    return await shouldShowCasualOnVideoWithOriginalTitleElement(videoID, originalTitleElement, brandingLocation)
+        && await hasCustomTitleWithOriginalTitle(videoID, originalTitleElement, brandingLocation)
+        && await shouldDefaultToCustom(videoID);
 }
