@@ -1,5 +1,5 @@
 import * as React from "react";
-import Config from "../config/config";
+import Config, { ConfigurationID, TitleFormatting } from "../config/config";
 import { showDonationLink } from "../utils/configUtils";
 import { YourWorkComponent } from "./YourWorkComponent";
 import { ToggleOptionComponent } from "./ToggleOptionComponent";
@@ -8,12 +8,55 @@ import { isSafari } from "../../maze-utils/src/config";
 import { isActivated } from "../license/license";
 import { LicenseComponent } from "../license/LicenseComponent";
 import { FormattedText } from "./FormattedTextComponent";
+import { SelectOptionComponent } from "./SelectOptionComponent";
+import { getChannelOverrideID, getOverrideOptionForConfigID, setOverrideOrOriginal, VideoOverrideData } from "../config/channelOverrides";
+
+type ChannelOverridesAction = "forJustThisVideo" | "forThisChannel" | null;
+interface ChannelOverridesOption {
+    name: ChannelOverridesAction;
+    active: (videoData: VideoOverrideData) => boolean;
+}
+
+interface ChannelOverrideRadioButtonsProps {
+    selected: ChannelOverridesAction;
+    setSelected: (s: ChannelOverridesAction, updateConfig: boolean) => void;
+    disabled: boolean;
+    configID: ConfigurationID | null;
+    videoData: VideoOverrideData;
+    titleFormatting: TitleFormatting;
+}
+
+interface ChannelOverrideActionComponentProps {
+    selected: boolean;
+    setSelected: (s: boolean) => void;
+    highlighted: boolean;
+    disabled: boolean;
+    overridden: boolean;
+    label: string;
+    titleFormatting: TitleFormatting;
+}
+
 
 export const PopupComponent = () => {
     const [extensionEnabled, setExtensionEnabled] = React.useState(Config.config!.extensionEnabled);
     const [replaceTitles, setReplaceTitles] = React.useState(Config.config!.replaceTitles);
     const [replaceThumbnails, setReplaceThumbnails] = React.useState(Config.config!.replaceThumbnails);
     const [titleFormatting, setTitleFormatting] = React.useState(Config.config!.titleFormatting);
+    const [configID, setConfigID] = React.useState<ConfigurationID | null>(null);
+
+    const [videoData, setVideoOverrideData] = React.useState<VideoOverrideData | null>(null);
+    React.useEffect(() => {
+        loadVideoOverrideData().then((d) => {
+            if (d) {
+                setVideoOverrideData(d);
+            }
+        });
+    }, []);
+
+    React.useEffect(() => {
+        setReplaceTitles(getOverrideOptionForConfigID(configID ?? null, "replaceTitles")!);
+        setReplaceThumbnails(getOverrideOptionForConfigID(configID ?? null, "replaceThumbnails")!);
+    }, [configID]);
 
     return (
         <>
@@ -51,6 +94,15 @@ export const PopupComponent = () => {
                 <>
                     {/* Toggle Box */}
                     <div className="sbControlsMenu">
+                        {
+                            videoData?.videoID &&
+                                <ChannelOverridesButton
+                                    videoData={videoData}
+                                    configID={configID}
+                                    setConfigID={setConfigID}
+                                    titleFormatting={titleFormatting}
+                                />
+                        }
                         {/* github: mbledkowski/toggle-switch */}
                         <label id="disableExtension" htmlFor="toggleSwitch" className="toggleSwitchContainer sbControlsMenu-item">
                         <span className="toggleSwitchContainer-switch">
@@ -94,12 +146,21 @@ export const PopupComponent = () => {
                         </button>
                     </div>
 
+                    {configID &&
+                        <div className="configurationName">
+                            <FormattedText
+                                text={Config.config!.customConfigurations[configID]?.name}
+                                titleFormatting={titleFormatting}
+                            />
+                        </div>
+                    }
+
                     {/* Replace titles/thumbnails */}
                     <ToggleOptionComponent
                         id="replaceTitles"
                         onChange={(value) => {
                             setReplaceTitles(value);
-                            Config.config!.replaceTitles = value;
+                            setOverrideOrOriginal(configID, "replaceTitles", value);
                         }}
                         value={replaceTitles}
                         label={chrome.i18n.getMessage("replaceTitles")}
@@ -113,7 +174,7 @@ export const PopupComponent = () => {
                         }}
                         onChange={(value) => {
                             setReplaceThumbnails(value);
-                            Config.config!.replaceThumbnails = value;
+                            setOverrideOrOriginal(configID, "replaceThumbnails", value);
                         }}
                         value={replaceThumbnails}
                         label={chrome.i18n.getMessage("replaceThumbnails")}
@@ -121,6 +182,7 @@ export const PopupComponent = () => {
                     />
 
                     <FormattingOptionsComponent
+                        configID={configID}
                         titleFormatting={titleFormatting}
                         setTitleFormatting={setTitleFormatting}
                     />
@@ -187,3 +249,311 @@ export const PopupComponent = () => {
         </>
     );
 };
+
+interface ChannelOverridesButtonProps {
+    videoData: VideoOverrideData;
+    configID: ConfigurationID | null;
+    setConfigID: (c: ConfigurationID | null) => void;
+    titleFormatting: TitleFormatting;
+}
+
+function ChannelOverridesButton(props: ChannelOverridesButtonProps): JSX.Element {
+    const [menuOpen, setMenuOpen] = React.useState(false);
+    const channelOverrideId = getChannelOverrideID(props.videoData);
+
+    React.useEffect(() => {
+        setMenuOpen(false);
+    }, [props.videoData]);
+
+    return (
+        <>
+            <label id="skipProfileButton" 
+                    htmlFor="skipProfileToggle"
+                    className="toggleSwitchContainer sbControlsMenu-item"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                        setMenuOpen(!menuOpen);
+                    }}>
+                <svg viewBox="0 0 24 24" width="23" height="23" className={"SBWhitelistIcon sbControlsMenu-itemIcon " + (menuOpen ? " rotated" : "")}>
+                    <path d="M24 10H14V0h-4v10H0v4h10v10h4V14h10z" />
+                </svg>
+                <span id="whitelistChannel" className={!(!menuOpen && !channelOverrideId) ? " hidden" : ""}>
+                    <FormattedText
+                        langKey="addChannelToOverride"
+                        titleFormatting={props.titleFormatting}
+                    />
+                </span>
+                <span id="whitelistChannel" className={!(!menuOpen && channelOverrideId) ? " hidden" : ""}>
+                    <FormattedText
+                        langKey="editActiveOverride"
+                        titleFormatting={props.titleFormatting}
+                    />
+                </span>
+                <span id="unwhitelistChannel" className={!menuOpen ? " hidden" : ""}>
+                    <FormattedText
+                        langKey="closeOverrideMenu"
+                        titleFormatting={props.titleFormatting}
+                    />
+                </span>
+            </label>
+
+            <ChannelOverridesMenu open={menuOpen}
+                videoData={props.videoData}
+                configID={props.configID}
+                setConfigID={props.setConfigID}
+                titleFormatting={props.titleFormatting} 
+            />
+        </>
+    );
+}
+
+const channelOverridesOptions: ChannelOverridesOption[] = [{
+    name: "forJustThisVideo",
+    active: (d) => getChannelOverrideID(d, { onlyVideo: true }) !== null
+}, {
+    name: "forThisChannel",
+    active: (d) => getChannelOverrideID(d, { onlyChannelID: true }) !== null
+}];
+
+interface ChannelOverridesMenuProps {
+    open: boolean;
+    videoData: VideoOverrideData;
+    configID: ConfigurationID | null;
+    setConfigID: (c: ConfigurationID | null) => void;
+    titleFormatting: TitleFormatting;
+}
+
+function ChannelOverridesMenu(props: ChannelOverridesMenuProps): JSX.Element {
+    const [selectedOverrideAction, setSelectedOverrideAction] = React.useState<ChannelOverridesAction>(null);
+    const [allConfigurations, setAllConfigurations] = React.useState(Object.entries(Config.config!.customConfigurations));
+    const configID = props.configID;
+
+    React.useEffect(() => {
+        props.setConfigID(getChannelOverrideID(props.videoData));
+    }, [props.videoData]);
+
+    React.useEffect(() => {
+        Config.configSyncListeners.push(() => {
+            setAllConfigurations(Object.entries(Config.config!.customConfigurations));
+        });
+    }, []);
+
+    return (
+        <div id="skipProfileMenu" className={`${!props.open ? " hidden" : ""}`}
+            aria-label={chrome.i18n.getMessage("SkipProfileMenu")}>
+            <div style={{position: "relative"}}>
+                <SelectOptionComponent
+                    id="sbSkipProfileSelection"
+                    label={chrome.i18n.getMessage("SelectASkipProfile")}
+                    applyFormattingToOptions={true}
+                    titleFormatting={props.titleFormatting}
+                    onChange={(value) => {
+                        if (value === "new") {
+                            chrome.runtime.sendMessage({ message: "openConfig", hash: "newProfile" });
+                            return;
+                        }
+
+                        const configID = value === "null" ? null : value as ConfigurationID;
+                        props.setConfigID(configID);
+                        if (configID === null) {
+                            setSelectedOverrideAction(null);
+                        }
+
+                        if (selectedOverrideAction) {
+                            updateChannelOverrideSetting(props.videoData, selectedOverrideAction, configID);
+
+                            if (configID === null) {
+                                for (const option of channelOverridesOptions) {
+                                    if (option.name !== selectedOverrideAction && option.active(props.videoData)) {
+                                        updateChannelOverrideSetting(props.videoData, option.name, null);
+                                    }
+                                }
+                            }
+                        } else if (!Config.config!.channelOverrides[props.videoData.videoID]) {
+                            // If nothing set for this video, default to setting for the channel
+                            setSelectedOverrideAction("forThisChannel");
+                            updateChannelOverrideSetting(props.videoData, "forThisChannel", configID)
+                        }
+                    }}
+                    value={configID ?? "null"}
+                    options={[{
+                        value: "null",
+                        label: chrome.i18n.getMessage("DefaultConfiguration")
+                    }].concat(allConfigurations.map(([key, value]) => ({
+                        value: key,
+                        label: value.name
+                    }))).concat([{
+                        value: "new",
+                        label: chrome.i18n.getMessage("CreateNewConfiguration")
+                    }])}
+                />
+
+                <ChannelOverrideRadioButtons
+                    selected={selectedOverrideAction}
+                    setSelected={(s, updateConfig) => {
+                        if (updateConfig) {
+                            if (s === null) {
+                                updateChannelOverrideSetting(props.videoData, selectedOverrideAction, null);
+                            } else {
+                                updateChannelOverrideSetting(props.videoData, s, configID);
+                            }
+                        } else if (s !== null) {
+                            props.setConfigID(getChannelOverrideID(props.videoData));
+                        }
+
+                        setSelectedOverrideAction(s);
+                    }}
+                    disabled={configID === null}
+                    configID={configID}
+                    videoData={props.videoData}
+                    titleFormatting={props.titleFormatting}
+                />
+            </div>
+        </div>
+    );
+}
+
+function ChannelOverrideRadioButtons(props: ChannelOverrideRadioButtonsProps): JSX.Element {
+    const result: JSX.Element[] = [];
+
+    React.useEffect(() => {
+        if (props.configID === null) {
+            props.setSelected(null, false);
+        } else {
+            for (const option of channelOverridesOptions) {
+                if (option.active(props.videoData)) {
+                    if (props.selected !== option.name) {
+                        props.setSelected(option.name, false);
+                    }
+
+                    return;
+                }
+            }
+        }
+    }, [props.configID, props.videoData, props.selected]);
+
+    let alreadySelected = false;
+    for (const option of channelOverridesOptions) {
+        const highlighted = option.active(props.videoData) && props.selected !== option.name;
+        const overridden = !highlighted && alreadySelected;
+        result.push(
+            <ChannelOverrideActionComponent
+                highlighted={highlighted}
+                label={chrome.i18n.getMessage(`skipProfile_${option.name}`)}
+                selected={props.selected === option.name}
+                overridden={overridden}
+                disabled={props.disabled || overridden}
+                key={option.name}
+                titleFormatting={props.titleFormatting}
+                setSelected={(s) => {
+                    props.setSelected(s ? option.name : null, true);
+                }}/>
+        );
+
+        if (props.selected === option.name) {
+            alreadySelected = true;
+        }
+    }
+
+    return <div id="skipProfileActions">
+        {result}
+    </div>
+}
+
+function ChannelOverrideActionComponent(props: ChannelOverrideActionComponentProps): JSX.Element {
+    let title = "";
+    if (props.selected) {
+        title = chrome.i18n.getMessage("clickToNotApplyThisProfile");
+    } else if ((props.highlighted && !props.disabled) || props.overridden) {
+        title = chrome.i18n.getMessage("skipProfileBeingOverriddenByHigherPriority");
+    } else if (!props.highlighted && !props.disabled) {
+        title = chrome.i18n.getMessage("clickToApplyThisProfile");
+    } else if (props.disabled) {
+        title = chrome.i18n.getMessage("selectASkipProfileFirst");
+    }
+
+    return (
+        <div className={`skipOptionAction ${props.selected ? "selected" : ""} ${props.highlighted ? "highlighted" : ""} ${props.disabled ? "disabled" : ""}`}
+            title={title}
+            role="button"
+            tabIndex={0}
+            aria-pressed={props.selected}
+            onClick={() => {
+                // Need to uncheck or disable a higher priority option first
+                if (!props.disabled && !props.highlighted) {
+                    props.setSelected(!props.selected);
+                }
+            }}>
+            
+            <FormattedText
+                text={props.label}
+                titleFormatting={props.titleFormatting}
+            />
+        </div>
+    );
+}
+
+function updateChannelOverrideSetting(videoData: VideoOverrideData, action: ChannelOverridesAction, configID: ConfigurationID | null) {
+    switch (action) {
+        case "forJustThisVideo":
+            if (configID) {
+                Config.config!.channelOverrides[videoData.videoID] = configID;
+            } else {
+                delete Config.config!.channelOverrides[videoData.videoID];
+            }
+
+            Config.forceSyncUpdate("channelOverrides");
+            break;
+        case "forThisChannel": {
+            if (!videoData.channelHandle) {
+                alert(chrome.i18n.getMessage("channelDataNotFound"));
+                return;
+            }
+
+            if (configID) {
+                Config.config!.channelOverrides[videoData.channelHandle] = configID;
+            } else {
+                delete Config.config!.channelOverrides[videoData.channelHandle];
+                delete Config.config!.channelOverrides[videoData.channelID!];
+                delete Config.config!.channelOverrides[videoData.channelName!];
+            }
+
+            Config.forceSyncUpdate("channelOverrides");
+            break;
+        }
+    }
+}
+
+async function loadVideoOverrideData(): Promise<VideoOverrideData | null> {
+    const response = await sendMessage({ message: "getVideoData" });
+
+    if (response && response.videoID) {
+        return response;
+    } else {
+        // Handle error if it exists
+        chrome.runtime.lastError;
+        return null;
+    }
+}
+
+interface Message {
+    message: string;
+}
+
+function sendMessage(request: Message): Promise<VideoOverrideData> {
+    return new Promise((resolve) => {
+        if (chrome.tabs) {
+            chrome.tabs.query({
+                active: true,
+                currentWindow: true
+            }, (tabs) => {
+                if (tabs[0]?.id) {
+                    chrome.tabs.sendMessage(tabs[0].id, request, resolve);
+                }
+            });
+        } else {
+            chrome.runtime.sendMessage({ message: "tabs", data: request }, resolve);
+        }
+    });
+}

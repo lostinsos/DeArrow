@@ -5,7 +5,7 @@ import { ThumbnailResult } from "../thumbnails/thumbnailData";
 import { getThumbnailImageSelector, replaceThumbnail } from "../thumbnails/thumbnailRenderer";
 import { TitleResult } from "../titles/titleData";
 import { findOrCreateShowOriginalButton, getOrCreateTitleElement, getOriginalTitleElement, hideAndUpdateShowOriginalButton as hideAndUpdateShowOriginalButton, replaceTitle } from "../titles/titleRenderer";
-import { setThumbnailListener } from "../../maze-utils/src/thumbnailManagement";
+import { removeHandledThumbnail, setThumbnailListener } from "../../maze-utils/src/thumbnailManagement";
 import Config, { ThumbnailCacheOption, TitleFormatting } from "../config/config";
 import { logError } from "../utils/logger";
 import { getVideoCasualInfo, getVideoTitleIncludingUnsubmitted } from "../dataFetching";
@@ -126,16 +126,22 @@ export async function replaceCurrentVideoBranding(): Promise<[boolean, boolean]>
 }
 
 function getPossibleSelectors(onWatchPage: boolean, onEmbedPage: boolean, onChannelPage: boolean) {
-    const embedSelector = {
-        selector: ".ytp-title-text, .ytPlayerOverlayVideoDetailsRendererTitle",
+    const embedSelectors = [{
+        selector: ".ytmVideoInfoVideoTitle",
         checkVisibility: false
-    };
+    }, {
+        selector: ".ytp-title-text",
+        checkVisibility: false
+    }, {
+        selector: ".ytPlayerOverlayVideoDetailsRendererTitle",
+        checkVisibility: false
+    }];
     const desktopWatchSelectors = [
         {
             selector: getYouTubeTitleNodeSelector(),
             checkVisibility: true
         },
-        embedSelector,
+        ...embedSelectors,
         {
             selector: "ytd-video-description-header-renderer #shorts-title",
             checkVisibility: false
@@ -176,7 +182,7 @@ function getPossibleSelectors(onWatchPage: boolean, onEmbedPage: boolean, onChan
             }
         ].concat(desktopMiniplayerSelector);
     } else if (onEmbedPage) {
-        return [embedSelector];
+        return embedSelectors;
     } else {
         return desktopMiniplayerSelector;
     }
@@ -251,6 +257,8 @@ export async function replaceVideoCardBranding(element: HTMLElement, brandingLoc
         if (originalThumbnail) {
             originalThumbnail.classList.add("cb-visible");
         }
+
+        removeHandledThumbnail(element);
     }
 
     return [false, false];
@@ -260,7 +268,7 @@ export function getLinkElement(element: HTMLElement, brandingLocation: BrandingL
     switch (brandingLocation) {
         case BrandingLocation.Related:
             if (!onMobile()) {
-                const link = element.querySelector("a#thumbnail, a.reel-item-endpoint, a.yt-lockup-metadata-view-model__title, a.yt-lockup-metadata-view-model__title-link, a.yt-lockup-view-model__content-image, a.yt-lockup-metadata-view-model-wiz__title") as HTMLAnchorElement;
+                const link = element.querySelector("a#thumbnail, a.reel-item-endpoint, a.yt-lockup-metadata-view-model__title, a.yt-lockup-metadata-view-model__title-link, a.yt-lockup-view-model__content-image, a.ytLockupViewModelContentImage, a.yt-lockup-metadata-view-model-wiz__title") as HTMLAnchorElement;
 
                 if (isOnV3Extension()) {
                     if (element.tagName === "A") {
@@ -277,7 +285,7 @@ export function getLinkElement(element: HTMLElement, brandingLocation: BrandingL
                 }
             } else {
                 // Big thumbnails, compact thumbnails, shorts, channel feature, playlist header
-                return element.querySelector("a.media-item-thumbnail-container, a.compact-media-item-image, a.reel-item-endpoint, :scope > a, .amsterdam-playlist-thumbnail-wrapper > a, a.YtmCompactMediaItemMetadataContent") as HTMLAnchorElement;
+                return element.querySelector("a.media-item-thumbnail-container, a.compact-media-item-image, a.reel-item-endpoint, :scope > a, .ytPageHeaderViewModelHeadlineInfo  a.yt-spec-button-shape-next--overlay, a.YtmCompactMediaItemMetadataContent") as HTMLAnchorElement;
             }
         case BrandingLocation.Endcards:
             return element.querySelector("a.ytp-ce-covering-overlay") as HTMLAnchorElement;

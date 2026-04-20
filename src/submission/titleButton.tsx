@@ -134,7 +134,16 @@ export class TitleButton {
         let popupNode = onMobile()
             ? document.querySelector(".watch-below-the-player") 
             : document.querySelector("#secondary-inner");
-        if (!popupNode || popupNode.childElementCount < 2 || isOnDescriptionOnRightLayout || this.displayFloating) {
+
+        const rightPanelHiddenWithUnhook = popupNode && popupNode.parentElement
+            && document.getElementById("unhook-yt")
+            && getComputedStyle(popupNode.parentElement).display === "none";
+
+        if (!popupNode
+                || popupNode.childElementCount < 2
+                || isOnDescriptionOnRightLayout
+                || this.displayFloating
+                || rightPanelHiddenWithUnhook) {
             popupNode = referenceNode.parentElement;
         }
 

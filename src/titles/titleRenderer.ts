@@ -311,7 +311,8 @@ function getTitleSelector(brandingLocation: BrandingLocation): string[] {
                 return [
                     "yt-formatted-string", 
                     ".ytp-title-link.yt-uix-sessionlink",
-                    ".yt-core-attributed-string"
+                    ".yt-core-attributed-string",
+                    ".ytAttributedStringHost" // 2025 April Mobile
                 ];
             } else {
                 return [
@@ -326,17 +327,22 @@ function getTitleSelector(brandingLocation: BrandingLocation): string[] {
                     "#description #title", // Related videos in description
                     ".yt-lockup-metadata-view-model-wiz__title .yt-core-attributed-string", // New desktop related
                     ".yt-lockup-metadata-view-model__title .yt-core-attributed-string", // New desktop related
+                    ".ytLockupMetadataViewModelTitle .yt-core-attributed-string", // 2026 April desktop homepage
+                    ".ytLockupMetadataViewModelTitle .ytAttributedStringHost", // 2026 April desktop homepage
+                    ".shortsLockupViewModelHostMetadataTitle .ytAttributedStringHost", // 2026 April  desktop shorts
                     ".ShortsLockupViewModelHostMetadataTitle .yt-core-attributed-string", // New desktop shorts
                     ".shortsLockupViewModelHostMetadataTitle .yt-core-attributed-string", // New desktop shorts
                     ".details .media-item-headline .yt-core-attributed-string", // Mobile YouTube
+                    ".details .media-item-headline .ytAttributedStringHost", // 2026 April Mobile YouTube
                     ".reel-item-metadata h3 .yt-core-attributed-string", // Mobile YouTube Shorts
-                    ".shortsLockupViewModelHostMetadataTitle .yt-core-attributed-string", // Mobile YouTube Shorts
                     ".details > .yt-core-attributed-string", // Mobile YouTube Channel Feature
+                    ".details > .ytAttributedStringHost", // 2026 April Mobile YouTube Channel Feature
                     ".compact-media-item-headline .yt-core-attributed-string", // Mobile YouTube Compact,
+                    ".YtmCompactMediaItemHeadline .ytAttributedStringHost", // 2026 April Mobile YouTube Compact,
                     ".amsterdam-playlist-title .yt-core-attributed-string", // Mobile YouTube Playlist Header,
+                    ".ytPageHeaderViewModelTitle .ytAttributedStringHost", // 2026 April Mobile YouTube Playlist Header,
                     ".autonav-endscreen-video-title .yt-core-attributed-string", // Mobile YouTube Autoplay
-                    ".video-card-title .yt-core-attributed-string", // Mobile YouTube History List
-                    ".YtmCompactMediaItemHeadline .yt-core-attributed-string"
+                    ".autonav-endscreen-video-title .ytAttributedStringHost", // 2026 April Mobile YouTube Autoplay
                 ];
             } else {
                 return [
@@ -351,6 +357,7 @@ function getTitleSelector(brandingLocation: BrandingLocation): string[] {
                 ".ytp-title-link.yt-uix-sessionlink",
                 ".yt-core-attributed-string",
                 "a.yt-formatted-string", // Channel trailers
+                ".ytAttributedStringHost" // 2025 April Embed
             ];
         case BrandingLocation.Endcards:
             return [".ytp-ce-video-title", ".ytp-ce-playlist-title"];
@@ -459,11 +466,12 @@ function createTitleElement(element: HTMLElement, originalTitleElement: HTMLElem
             titleElement.parentElement!.style.justifyContent = "space-between";
 
             // For 2024 Oct new UI
-            if (titleElement.parentElement!.classList.contains("yt-lockup-metadata-view-model__title")) {
+            if (titleElement.parentElement!.classList.contains("yt-lockup-metadata-view-model__title")
+                || titleElement.parentElement!.classList.contains("ytLockupMetadataViewModelTitle")) {
                 titleElement.parentElement!.classList.add("cbTitle24");
                 titleElement.parentElement!.parentElement!.style.setProperty("--cb-max-height", `calc(${getComputedStyle(titleElement.parentElement!).lineHeight} * ${Math.max(1, Config.config!.titleMaxLines)})`)
 
-                const container = titleElement.closest(".yt-lockup-metadata-view-model__text-container") as HTMLElement;
+                const container = titleElement.closest(".yt-lockup-metadata-view-model__text-container, .ytLockupMetadataViewModelTextContainer") as HTMLElement;
                 if (container) {
                     container.style.width = "100%";
                 }
